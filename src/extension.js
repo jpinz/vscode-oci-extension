@@ -89,7 +89,7 @@ class OciPanelController {
     }
 
     const defaultKey = Array.isArray(layout.roots)
-      ? (layout.roots[1] || layout.roots[0])
+      ? (layout.roots[1] ?? layout.roots[0])
       : undefined;
     const resolvedKey = focusKey || defaultKey;
     const focusNode = resolvedKey ? layout.nodesByKey[resolvedKey] : undefined;
@@ -110,7 +110,7 @@ class OciPanelController {
 
   show(layout, focusKey, options = {}) {
     const { reveal = true } = options;
-    const focusNode = this.setFocus(layout, focusKey || layout.roots[1]);
+    const focusNode = this.setFocus(layout, focusKey);
     if (!focusNode) {
       return;
     }
@@ -573,10 +573,9 @@ function activate(context) {
       const layout = parseLayout(rootPath);
       treeProvider.setLayout(layout);
       await context.workspaceState.update('ociExplorer.rootPath', rootPath);
-      const focusKey = preferredKey || layout.roots[1];
-      panelController.setFocus(layout, focusKey);
-      if (getNavigationPreferences().showWebview) {
-        panelController.show(layout, focusKey);
+      const focusNode = panelController.setFocus(layout, preferredKey);
+      if (getNavigationPreferences().showWebview && focusNode) {
+        panelController.show(layout, focusNode.key);
       }
     } catch (error) {
       vscode.window.showErrorMessage(error.message);
