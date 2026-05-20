@@ -399,8 +399,8 @@ function renderWebviewHtml(layout, focusKey, cspSource) {
           const command = target.dataset.action === 'focus'
             ? 'focusNode'
             : target.dataset.action === 'home'
-                ? 'goHome'
-                : 'openFile';
+              ? 'goHome'
+              : 'openFile';
           vscode.postMessage({ command, key: target.dataset.key });
         });
       </script>
