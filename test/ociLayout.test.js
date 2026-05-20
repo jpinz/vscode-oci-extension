@@ -6,6 +6,8 @@ const path = require('node:path');
 const { digestToPath, isOciLayoutFolder, parseLayout } = require('../src/ociLayout');
 
 const fixturePath = path.join(__dirname, 'fixtures', 'sample-layout');
+const richFixturePath = path.join(__dirname, 'fixtures', 'rich-layout');
+const attestationFixturePath = path.join(__dirname, 'fixtures', 'attestation-layout');
 
 test('digestToPath maps blob digests into OCI blob paths', () => {
   assert.equal(
@@ -23,20 +25,39 @@ test('parseLayout links the image index, manifest, config, and layers', () => {
 
   const indexNode = layout.nodesByKey['index-file'];
   assert.equal(indexNode.children.length, 1);
+  assert.equal(indexNode.children[0].relation, 'manifest');
 
   const manifestNode = layout.nodesByKey[indexNode.children[0].key];
   assert.equal(manifestNode.kind, 'image-manifest');
   assert.equal(manifestNode.label, 'demo:v1 • linux/amd64');
+  assert.equal(manifestNode.name, 'manifest');
   assert.equal(manifestNode.children.length, 2);
 
   const configNode = layout.nodesByKey[manifestNode.children[0].key];
   assert.equal(configNode.kind, 'config');
-  assert.equal(configNode.label, 'runtime config • linux/amd64');
+  assert.equal(configNode.label, 'image config • linux/amd64');
 
   const layerNode = layout.nodesByKey[manifestNode.children[1].key];
   assert.equal(layerNode.kind, 'layer');
   assert.equal(layerNode.label, 'layer • app/bin/demo');
   assert.match(layerNode.filePath, /blobs[\\/]+sha256[\\/]+3333333333333333333333333333333333333333333333333333333333333333$/);
+});
+
+test('parseLayout uses attestation and image index annotations in labels', () => {
+  const layout = parseLayout(richFixturePath);
+  const indexNode = layout.nodesByKey['index-file'];
+
+  assert.equal(indexNode.children.length, 2);
+  assert.equal(indexNode.children[0].relation, 'manifest');
+  assert.equal(indexNode.children[1].relation, 'manifest');
+
+  const nestedIndexNode = layout.nodesByKey[indexNode.children[0].key];
+  assert.equal(nestedIndexNode.kind, 'image-index');
+  assert.equal(nestedIndexNode.label, 'demo:nested');
+
+  const attestationNode = layout.nodesByKey[indexNode.children[1].key];
+  assert.equal(attestationNode.kind, 'image-manifest');
+  assert.equal(attestationNode.label, 'attestation manifest');
 });
 
 test('isOciLayoutFolder requires layout markers and the blobs directory', () => {
@@ -58,4 +79,18 @@ test('isOciLayoutFolder requires layout markers and the blobs directory', () => 
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
+});
+
+test('parseLayout categorizes in-toto statements and docker configs for display labels', () => {
+  const layout = parseLayout(attestationFixturePath);
+  const indexNode = layout.nodesByKey['index-file'];
+  const labels = indexNode.children.map((child) => layout.nodesByKey[child.key].label);
+
+  assert.deepEqual(labels, [
+    'slsa provenance • linux/amd64',
+    'sbom (spdx) • linux/arm64',
+    'sbom (cyclonedx)',
+    'attestation • custom-v1',
+    'image config • linux/s390x'
+  ]);
 });

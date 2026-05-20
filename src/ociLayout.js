@@ -45,7 +45,9 @@ function getReadableKind(mediaType, json) {
     return 'image-manifest';
   }
 
-  if (mediaType && mediaType.includes('config')) {
+  if (mediaType === 'application/vnd.oci.image.config.v1+json'
+    || mediaType === 'application/vnd.docker.container.image.v1+json'
+    || (mediaType && mediaType.includes('config'))) {
     return 'config';
   }
 
@@ -80,19 +82,90 @@ function getPlatformLabel(source) {
   return source.os || source.architecture || null;
 }
 
+function getAttestationLabel(annotations) {
+  return annotations && annotations['vnd.docker.reference.type'] === 'attestation-manifest'
+    ? 'attestation manifest'
+    : null;
+}
+
+function withPlatformLabel(baseLabel, platform) {
+  return joinLabelParts([baseLabel, getPlatformLabel(platform)]);
+}
+
+function toSlug(value) {
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function isSlsaProvenancePredicate(predicateType) {
+  try {
+    const parsed = new URL(predicateType);
+    return parsed.hostname === 'slsa.dev'
+      && (parsed.pathname === '/provenance/v1' || parsed.pathname === '/provenance/v0.2');
+  } catch (error) {
+    return false;
+  }
+}
+
+function getInTotoDisplayLabel(node) {
+  if (node.mediaType !== 'application/vnd.in-toto+json') {
+    return null;
+  }
+
+  const predicateType = node.json && typeof node.json.predicateType === 'string'
+    ? node.json.predicateType.toLowerCase()
+    : '';
+  let baseLabel = 'attestation';
+
+  if (isSlsaProvenancePredicate(predicateType)) {
+    baseLabel = 'slsa provenance';
+  } else if (predicateType.includes('spdx')) {
+    baseLabel = 'sbom (spdx)';
+  } else if (predicateType.includes('cyclonedx')) {
+    baseLabel = 'sbom (cyclonedx)';
+  } else if (predicateType) {
+    const leafSegment = predicateType.split('#').pop().split('/').pop();
+    baseLabel = joinLabelParts(['attestation', toSlug(leafSegment) || 'other']);
+  }
+
+  return withPlatformLabel(baseLabel, node.platform);
+}
+
 function getHumanReadableName(node) {
+  const inTotoLabel = getInTotoDisplayLabel(node);
+  if (inTotoLabel) {
+    return inTotoLabel;
+  }
+
   if (node.kind === 'image-manifest') {
+    const attestationLabel = getAttestationLabel(node.annotations);
+    if (attestationLabel) {
+      return withPlatformLabel(attestationLabel, node.platform) || node.name;
+    }
+
     return joinLabelParts([
       node.annotations && node.annotations['org.opencontainers.image.ref.name'],
       getPlatformLabel(node.platform)
     ]) || node.name;
   }
 
+  if (node.kind === 'image-index') {
+    const imageName = node.mediaType === 'application/vnd.oci.image.index.v1+json'
+      && node.annotations
+      ? node.annotations['io.containerd.image.name']
+      : null;
+
+    if (imageName) {
+      return imageName;
+    }
+
+    return node.name === 'index.json' ? node.name : 'image index';
+  }
+
   if (node.kind === 'config') {
-    return joinLabelParts([
-      'runtime config',
-      getPlatformLabel(node.json)
-    ]) || node.name;
+    return withPlatformLabel('image config', node.json) || node.name;
   }
 
   if (node.kind === 'layer') {
@@ -161,9 +234,9 @@ function createDescriptorNode(rootPath, descriptor, relationLabel, nodesByKey, t
 
   const childDescriptors = [];
   if (Array.isArray(node.json.manifests)) {
-    node.json.manifests.forEach((childDescriptor, index) => {
+    node.json.manifests.forEach((childDescriptor) => {
       childDescriptors.push({
-        relation: `manifest ${index + 1}`,
+        relation: 'manifest',
         descriptor: childDescriptor
       });
     });
@@ -246,10 +319,10 @@ function parseLayout(rootPath) {
     ? indexNode.json.manifests
     : [];
 
-  topLevelDescriptors.forEach((descriptor, index) => {
-    const childKey = createDescriptorNode(rootPath, descriptor, `manifest ${index + 1}`, nodesByKey, traversalStack);
+  topLevelDescriptors.forEach((descriptor) => {
+    const childKey = createDescriptorNode(rootPath, descriptor, 'manifest', nodesByKey, traversalStack);
     indexNode.children.push({
-      relation: `manifest ${index + 1}`,
+      relation: 'manifest',
       key: childKey
     });
   });

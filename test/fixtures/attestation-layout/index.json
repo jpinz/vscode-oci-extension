@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 2,
+  "manifests": [
+    {
+      "mediaType": "application/vnd.in-toto+json",
+      "platform": {
+        "os": "linux",
+        "architecture": "amd64"
+      },
+      "digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+      "size": 100
+    },
+    {
+      "mediaType": "application/vnd.in-toto+json",
+      "platform": {
+        "os": "linux",
+        "architecture": "arm64"
+      },
+      "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+      "size": 100
+    },
+    {
+      "mediaType": "application/vnd.in-toto+json",
+      "digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+      "size": 100
+    },
+    {
+      "mediaType": "application/vnd.in-toto+json",
+      "digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+      "size": 100
+    },
+    {
+      "mediaType": "application/vnd.docker.container.image.v1+json",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "size": 100
+    }
+  ]
+}
