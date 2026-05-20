@@ -120,7 +120,7 @@ function createDescriptorNode(rootPath, descriptor, relationLabel, nodesByKey, t
   const node = {
     key,
     name: relationLabel,
-    relationLabel,
+    relationName: relationLabel,
     kind: getReadableKind(descriptor.mediaType, json && !json.__parseError ? json : null),
     digest,
     mediaType: descriptor.mediaType || null,

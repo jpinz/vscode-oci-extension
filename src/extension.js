@@ -117,8 +117,8 @@ class OciPanelController {
 
 function describeNode(node) {
   const details = [node.kind];
-  if (node.relationLabel && node.relationLabel !== (node.displayName || node.name)) {
-    details.push(node.relationLabel);
+  if (node.relationName && node.relationName !== (node.displayName || node.name)) {
+    details.push(node.relationName);
   }
   if (node.mediaType) {
     details.push(node.mediaType.replace(/^application\/vnd\./, ''));
@@ -186,16 +186,25 @@ function escapeHtml(value) {
 }
 
 function renderNodeButton(node, relation) {
+  const subtext = getNodeSubtext(node, relation);
   return `<button class="link-button" data-action="focus" data-key="${escapeHtml(node.key)}">
     <span>${escapeHtml(node.label)}</span>
-    <small>${escapeHtml(relation && relation !== (node.displayName || node.name) ? `${relation} • ${node.kind}` : node.kind)}</small>
+    <small>${escapeHtml(subtext)}</small>
   </button>`;
+}
+
+function getNodeSubtext(node, relation) {
+  if (relation && relation !== (node.displayName || node.name)) {
+    return `${relation} • ${node.kind}`;
+  }
+
+  return node.kind;
 }
 
 function renderMetadataTable(node) {
   const rows = [
     ['Friendly name', node.label],
-    ['OCI role', node.relationLabel || '—'],
+    ['OCI relation', node.relationName || '—'],
     ['Kind', node.kind],
     ['Media type', node.mediaType || '—'],
     ['Digest', node.digest || '—'],
