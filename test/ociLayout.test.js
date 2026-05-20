@@ -57,7 +57,7 @@ test('parseLayout uses attestation and image index annotations in labels', () =>
 
   const attestationNode = layout.nodesByKey[indexNode.children[1].key];
   assert.equal(attestationNode.kind, 'image-manifest');
-  assert.equal(attestationNode.label, 'attestation manifest • https://spdx.dev/Document');
+  assert.equal(attestationNode.label, 'attestations/sbom');
 });
 
 test('isOciLayoutFolder requires layout markers and the blobs directory', () => {
@@ -87,10 +87,10 @@ test('parseLayout categorizes in-toto statements and docker configs for display 
   const labels = indexNode.children.map((child) => layout.nodesByKey[child.key].label);
 
   assert.deepEqual(labels, [
-    'slsa provenance • linux/amd64',
-    'sbom (spdx) • linux/arm64',
-    'sbom (cyclonedx)',
-    'Trivy Vulnerability Report',
+    'attestations/provenance • linux/amd64',
+    'attestations/sbom • linux/arm64',
+    'attestations/sbom',
+    'attestations/trivy',
     'image config • linux/s390x'
   ]);
 });
