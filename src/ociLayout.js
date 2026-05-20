@@ -109,6 +109,16 @@ function isSlsaProvenancePredicate(predicateType) {
   }
 }
 
+function isTrivyVulnerabilityPredicate(predicateType) {
+  try {
+    const parsed = new URL(predicateType);
+    return parsed.hostname === 'trivy.dev'
+      && parsed.pathname.startsWith('/attestations/vulnerability/');
+  } catch (error) {
+    return false;
+  }
+}
+
 function getInTotoDisplayLabel(node) {
   if (node.mediaType !== 'application/vnd.in-toto+json') {
     return null;
@@ -121,6 +131,8 @@ function getInTotoDisplayLabel(node) {
 
   if (isSlsaProvenancePredicate(predicateType)) {
     baseLabel = 'slsa provenance';
+  } else if (isTrivyVulnerabilityPredicate(predicateType)) {
+    baseLabel = 'Trivy Vulnerability Report';
   } else if (predicateType.includes('spdx')) {
     baseLabel = 'sbom (spdx)';
   } else if (predicateType.includes('cyclonedx')) {
