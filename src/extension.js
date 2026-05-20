@@ -84,12 +84,20 @@ class OciPanelController {
   }
 
   setFocus(layout, focusKey) {
-    if (!layout || !focusKey) {
-      return null;
+    if (!layout || !layout.nodesByKey) {
+      return undefined;
+    }
+
+    const defaultKey = Array.isArray(layout.roots)
+      ? (layout.roots[1] || layout.roots[0])
+      : undefined;
+    const resolvedKey = focusKey || defaultKey;
+    const focusNode = resolvedKey ? layout.nodesByKey[resolvedKey] : undefined;
+    if (!focusNode) {
+      return undefined;
     }
 
     this.currentLayout = layout;
-    const focusNode = layout.nodesByKey[focusKey] || layout.nodesByKey[layout.roots[1]];
     this.focusKey = focusNode.key;
     return focusNode;
   }
@@ -103,6 +111,9 @@ class OciPanelController {
   show(layout, focusKey, options = {}) {
     const { reveal = true } = options;
     const focusNode = this.setFocus(layout, focusKey || layout.roots[1]);
+    if (!focusNode) {
+      return;
+    }
 
     if (!this.panel) {
       const viewColumn = vscode.window.activeTextEditor && vscode.window.activeTextEditor.viewColumn
