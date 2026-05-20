@@ -57,7 +57,7 @@ test('parseLayout uses attestation and image index annotations in labels', () =>
 
   const attestationNode = layout.nodesByKey[indexNode.children[1].key];
   assert.equal(attestationNode.kind, 'image-manifest');
-  assert.equal(attestationNode.label, 'attestation manifest');
+  assert.equal(attestationNode.label, 'attestation manifest • https://spdx.dev/Document');
 });
 
 test('isOciLayoutFolder requires layout markers and the blobs directory', () => {
