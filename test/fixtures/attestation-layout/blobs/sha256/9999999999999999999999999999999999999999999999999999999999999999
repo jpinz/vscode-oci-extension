@@ -1,4 +1,4 @@
 {
   "_type": "https://in-toto.io/Statement/v0.1",
-  "predicateType": "https://example.dev/attestations/custom-v1"
+  "predicateType": "https://trivy.dev/attestations/vulnerability/v0.1"
 }
