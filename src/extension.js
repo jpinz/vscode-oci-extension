@@ -382,7 +382,7 @@ async function promptForLayoutFolder() {
 function activate(context) {
   const panelController = new OciPanelController(context);
   const treeProvider = new OciTreeProvider((nodeKey) => panelController.show(treeProvider.layout, nodeKey));
-  let layoutFolderContextTimer;
+  let layoutFolderContextTimer = null;
 
   const updateLayoutFolderContext = async () => {
     const layoutFiles = await vscode.workspace.findFiles('**/oci-layout');
@@ -449,6 +449,7 @@ function activate(context) {
   context.subscriptions.push(
     treeView,
     ...contextWatchers,
+    { dispose: () => clearTimeout(layoutFolderContextTimer) },
     vscode.workspace.onDidChangeWorkspaceFolders(scheduleLayoutFolderContextUpdate),
     vscode.commands.registerCommand('ociExplorer.openLayout', async (resource) => {
       const rootPath = resource && typeof resource.fsPath === 'string'
