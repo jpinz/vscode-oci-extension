@@ -150,14 +150,13 @@ function getHumanReadableName(node) {
   }
 
   if (node.kind === 'image-manifest') {
-    const predicateType = getPredicateTypeAnnotation(node.annotations);
-    if (predicateType) {
-      return withPlatformLabel(joinLabelParts(['attestation manifest', predicateType]), node.platform) || node.name;
-    }
-
     const attestationLabel = getAttestationLabel(node.annotations);
     if (attestationLabel) {
-      return withPlatformLabel(attestationLabel, node.platform) || node.name;
+      const predicateType = getPredicateTypeAnnotation(node.annotations);
+      const baseLabel = predicateType
+        ? joinLabelParts([attestationLabel, predicateType])
+        : attestationLabel;
+      return withPlatformLabel(baseLabel, node.platform) || node.name;
     }
 
     return joinLabelParts([
