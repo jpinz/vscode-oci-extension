@@ -81,11 +81,12 @@ function getHumanReadableName(node) {
   }
 
   if (node.kind === 'image-index') {
-    return node.mediaType === 'application/vnd.oci.image.index.v1+json'
+    const imageName = node.mediaType === 'application/vnd.oci.image.index.v1+json'
       && node.annotations
-      && node.annotations['io.containerd.image.name']
       ? node.annotations['io.containerd.image.name']
-      : node.name;
+      : null;
+
+    return imageName || node.name;
   }
 
   if (node.kind === 'config') {
