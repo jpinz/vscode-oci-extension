@@ -1,6 +1,14 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+function pathHasType(filePath, type) {
+  try {
+    return fs.statSync(filePath)[type]();
+  } catch (error) {
+    return false;
+  }
+}
+
 function safeReadJson(filePath) {
   try {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -20,6 +28,12 @@ function digestToPath(rootPath, digest) {
   }
 
   return path.join(rootPath, 'blobs', algorithm, encoded);
+}
+
+function isOciLayoutFolder(rootPath) {
+  return pathHasType(path.join(rootPath, 'oci-layout'), 'isFile')
+    && pathHasType(path.join(rootPath, 'index.json'), 'isFile')
+    && pathHasType(path.join(rootPath, 'blobs'), 'isDirectory');
 }
 
 function getReadableKind(mediaType, json) {
@@ -194,7 +208,7 @@ function parseLayout(rootPath) {
   const layoutPath = path.join(rootPath, 'oci-layout');
   const indexPath = path.join(rootPath, 'index.json');
 
-  if (!fs.existsSync(layoutPath) || !fs.existsSync(indexPath)) {
+  if (!isOciLayoutFolder(rootPath)) {
     throw new Error(`'${rootPath}' is not an OCI layout folder.`);
   }
 
@@ -265,5 +279,6 @@ function parseLayout(rootPath) {
 
 module.exports = {
   digestToPath,
+  isOciLayoutFolder,
   parseLayout
 };
