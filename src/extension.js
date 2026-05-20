@@ -117,6 +117,13 @@ class OciPanelController {
 
         if (message.command === 'openFile' && message.key && this.currentLayout.nodesByKey[message.key]) {
           openNodeFile(this.currentLayout.nodesByKey[message.key]);
+          return;
+        }
+
+        if (message.command === 'openPreview' && message.key && this.currentLayout.nodesByKey[message.key]) {
+          openNodePreview(this.currentLayout.nodesByKey[message.key]).catch((error) => {
+            console.error('Failed to open OCI raw preview.', error);
+          });
         }
       });
 
@@ -127,6 +134,9 @@ class OciPanelController {
 
     this.panel.title = getPanelTitle(layout, focusNode);
     this.panel.webview.html = renderWebviewHtml(layout, this.focusKey, this.panel.webview.cspSource);
+    openNodePreview(focusNode).catch((error) => {
+      console.error('Failed to open OCI raw preview.', error);
+    });
 
     if (reveal) {
       this.panel.reveal(this.panel.viewColumn, true);
@@ -194,6 +204,39 @@ async function openNodeFile(node) {
 
   const document = await vscode.workspace.openTextDocument(vscode.Uri.file(node.filePath));
   await vscode.window.showTextDocument(document, { preview: false });
+}
+
+function isJsonNode(node) {
+  if (!node) {
+    return false;
+  }
+
+  if (node.json || node.parseError) {
+    return true;
+  }
+
+  if (typeof node.name === 'string' && node.name.endsWith('.json')) {
+    return true;
+  }
+
+  return typeof node.mediaType === 'string' && node.mediaType.includes('json');
+}
+
+async function openNodePreview(node) {
+  if (!node || !node.filePath) {
+    return;
+  }
+
+  const document = await vscode.workspace.openTextDocument(vscode.Uri.file(node.filePath));
+  if (isJsonNode(node) && document.languageId !== 'json') {
+    await vscode.languages.setTextDocumentLanguage(document, 'json');
+  }
+
+  await vscode.window.showTextDocument(document, {
+    preview: true,
+    preserveFocus: true,
+    viewColumn: vscode.ViewColumn.Beside
+  });
 }
 
 function escapeHtml(value) {
@@ -266,7 +309,10 @@ function renderWebviewHtml(layout, focusKey, cspSource) {
     ['Layout version', layout.layoutVersion || 'unknown'],
     ['Descriptors', Object.values(layout.nodesByKey).filter((node) => node.digest).length]
   ];
-  const rawJson = focusNode.json ? JSON.stringify(focusNode.json, null, 2) : null;
+  const canPreview = !!focusNode.filePath;
+  const previewDescription = isJsonNode(focusNode)
+    ? 'Raw preview is shown in the VS Code editor for syntax highlighting and JSON folding.'
+    : 'Raw preview is shown in the VS Code editor when content is text-readable.';
   const nonce = createNonce();
   const title = getPanelTitle(layout, focusNode);
 
@@ -349,14 +395,6 @@ function renderWebviewHtml(layout, focusKey, cspSource) {
           flex-wrap: wrap;
           margin-bottom: 1rem;
         }
-        pre {
-          white-space: pre-wrap;
-          overflow-wrap: anywhere;
-          padding: 0.8rem;
-          border-radius: 8px;
-          background: var(--vscode-textCodeBlock-background);
-          border: 1px solid var(--vscode-panel-border);
-        }
         .empty {
           opacity: 0.75;
           margin: 0;
@@ -385,7 +423,12 @@ function renderWebviewHtml(layout, focusKey, cspSource) {
             <button class="action-button secondary" data-action="home" data-key="${escapeHtml(layout.roots[1])}">Root</button>
           </div>
           <h3>Raw preview</h3>
-          ${rawJson ? `<pre>${escapeHtml(rawJson)}</pre>` : '<p class="empty">Binary or non-JSON content; use "Open raw file" to inspect it directly.</p>'}
+          ${canPreview
+    ? `<p class="empty">${escapeHtml(previewDescription)}</p>
+             <div class="toolbar">
+               <button class="action-button secondary" data-action="preview" data-key="${escapeHtml(focusNode.key)}">Reveal raw preview</button>
+             </div>`
+    : '<p class="empty">No associated file for this node.</p>'}
         </section>
       </div>
       <script nonce="${nonce}">
@@ -400,6 +443,8 @@ function renderWebviewHtml(layout, focusKey, cspSource) {
             ? 'focusNode'
             : target.dataset.action === 'home'
               ? 'goHome'
+              : target.dataset.action === 'preview'
+                ? 'openPreview'
               : 'openFile';
           vscode.postMessage({ command, key: target.dataset.key });
         });
