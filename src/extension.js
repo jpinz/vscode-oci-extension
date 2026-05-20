@@ -211,7 +211,7 @@ function renderMetadataTable(node) {
   ];
 
   if (node.displayName && node.displayName !== node.relationName) {
-    rows.unshift(['Friendly name', node.label]);
+    rows.unshift(['Display name', node.label]);
   }
 
   rows.unshift(['OCI relation', node.relationName || '—']);

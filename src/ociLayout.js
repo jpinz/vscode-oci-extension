@@ -59,8 +59,11 @@ function getPlatformLabel(source) {
     return null;
   }
 
-  const variant = source.variant ? `/${source.variant}` : '';
-  return `${source.os || 'unknown'}/${source.architecture || 'unknown'}${variant}`;
+  if (source.os && source.architecture) {
+    return `${source.os}/${source.architecture}${source.variant ? `/${source.variant}` : ''}`;
+  }
+
+  return source.os || source.architecture || null;
 }
 
 function getHumanReadableName(node) {
