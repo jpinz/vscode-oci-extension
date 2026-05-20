@@ -88,6 +88,16 @@ function getAttestationLabel(annotations) {
     : null;
 }
 
+function getPredicateTypeAnnotation(annotations) {
+  if (!annotations || typeof annotations !== 'object') {
+    return null;
+  }
+
+  return typeof annotations['in-toto.io/predicate-type'] === 'string'
+    ? annotations['in-toto.io/predicate-type']
+    : null;
+}
+
 function withPlatformLabel(baseLabel, platform) {
   return joinLabelParts([baseLabel, getPlatformLabel(platform)]);
 }
@@ -140,6 +150,11 @@ function getHumanReadableName(node) {
   }
 
   if (node.kind === 'image-manifest') {
+    const predicateType = getPredicateTypeAnnotation(node.annotations);
+    if (predicateType) {
+      return withPlatformLabel(joinLabelParts(['attestation manifest', predicateType]), node.platform) || node.name;
+    }
+
     const attestationLabel = getAttestationLabel(node.annotations);
     if (attestationLabel) {
       return withPlatformLabel(attestationLabel, node.platform) || node.name;
