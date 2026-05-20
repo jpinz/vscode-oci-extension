@@ -1,7 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
-const { digestToPath, parseLayout } = require('../src/ociLayout');
+const { digestToPath, isOciLayoutFolder, parseLayout } = require('../src/ociLayout');
 
 const fixturePath = path.join(__dirname, 'fixtures', 'sample-layout');
 const richFixturePath = path.join(__dirname, 'fixtures', 'rich-layout');
@@ -55,4 +57,25 @@ test('parseLayout uses attestation and image index annotations in labels', () =>
   const attestationNode = layout.nodesByKey[indexNode.children[1].key];
   assert.equal(attestationNode.kind, 'image-manifest');
   assert.equal(attestationNode.label, 'attestation manifest');
+});
+
+test('isOciLayoutFolder requires layout markers and the blobs directory', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'oci-layout-test-'));
+  try {
+    assert.equal(isOciLayoutFolder(tempRoot), false);
+    assert.throws(() => parseLayout(tempRoot), /is not an OCI layout folder/);
+
+    fs.writeFileSync(path.join(tempRoot, 'oci-layout'), '{"imageLayoutVersion":"1.0.0"}');
+    assert.equal(isOciLayoutFolder(tempRoot), false);
+
+    fs.writeFileSync(path.join(tempRoot, 'index.json'), '{"schemaVersion":2,"manifests":[]}');
+    assert.equal(isOciLayoutFolder(tempRoot), false);
+    assert.throws(() => parseLayout(tempRoot), /is not an OCI layout folder/);
+
+    fs.mkdirSync(path.join(tempRoot, 'blobs'));
+
+    assert.equal(isOciLayoutFolder(tempRoot), true);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
 });

@@ -2,6 +2,8 @@ const path = require('node:path');
 const vscode = require('vscode');
 const { parseLayout } = require('./ociLayout');
 
+const CONTEXT_UPDATE_DEBOUNCE_MS = 50;
+
 class LayoutTreeItem extends vscode.TreeItem {
   constructor(node) {
     super(
@@ -446,6 +448,49 @@ async function promptForLayoutFolder() {
 function activate(context) {
   const panelController = new OciPanelController(context);
   const treeProvider = new OciTreeProvider((nodeKey) => panelController.show(treeProvider.layout, nodeKey));
+  let contextUpdateTimer = null;
+
+  const uriHasType = async (uri, type) => {
+    try {
+      return (await vscode.workspace.fs.stat(uri)).type === type;
+    } catch (error) {
+      return false;
+    }
+  };
+
+  const isOciLayoutFolderUri = async (rootUri) => {
+    const [hasLayout, hasIndex, hasBlobs] = await Promise.all([
+      uriHasType(vscode.Uri.joinPath(rootUri, 'oci-layout'), vscode.FileType.File),
+      uriHasType(vscode.Uri.joinPath(rootUri, 'index.json'), vscode.FileType.File),
+      uriHasType(vscode.Uri.joinPath(rootUri, 'blobs'), vscode.FileType.Directory)
+    ]);
+
+    return hasLayout && hasIndex && hasBlobs;
+  };
+
+  const updateLayoutFolderContext = async () => {
+    const layoutFiles = await vscode.workspace.findFiles('**/oci-layout', '**/node_modules/**');
+    const layoutFolders = {};
+
+    const folderChecks = layoutFiles.map(async (layoutFile) => {
+      const rootPath = path.dirname(layoutFile.fsPath);
+      if (await isOciLayoutFolderUri(vscode.Uri.file(rootPath))) {
+        layoutFolders[rootPath] = true;
+      }
+    });
+
+    await Promise.all(folderChecks);
+    await vscode.commands.executeCommand('setContext', 'ociExplorer.layoutFolders', layoutFolders);
+  };
+
+  const scheduleLayoutFolderContextUpdate = () => {
+    clearTimeout(contextUpdateTimer);
+    contextUpdateTimer = setTimeout(() => {
+      updateLayoutFolderContext().catch((error) => {
+        console.error('Failed to refresh OCI layout folder context.', error);
+      });
+    }, CONTEXT_UPDATE_DEBOUNCE_MS);
+  };
 
   const refreshFromPath = async (rootPath, preferredKey) => {
     if (!rootPath) {
@@ -468,18 +513,39 @@ function activate(context) {
     refreshFromPath(initialPath);
   }
 
+  scheduleLayoutFolderContextUpdate();
+
   const treeView = vscode.window.createTreeView('ociExplorer.layout', {
     treeDataProvider: treeProvider,
     showCollapseAll: true
   });
 
+  const contextWatchers = [
+    vscode.workspace.createFileSystemWatcher('**/oci-layout'),
+    vscode.workspace.createFileSystemWatcher('**/index.json'),
+    vscode.workspace.createFileSystemWatcher('**/blobs')
+  ];
+
+  contextWatchers.forEach((watcher) => {
+    watcher.onDidCreate(scheduleLayoutFolderContextUpdate);
+    watcher.onDidDelete(scheduleLayoutFolderContextUpdate);
+  });
+
   context.subscriptions.push(
     treeView,
-    vscode.commands.registerCommand('ociExplorer.openLayout', async () => {
-      const rootPath = await promptForLayoutFolder();
+    ...contextWatchers,
+    { dispose: () => clearTimeout(contextUpdateTimer) },
+    vscode.workspace.onDidChangeWorkspaceFolders(scheduleLayoutFolderContextUpdate),
+    vscode.commands.registerCommand('ociExplorer.openLayout', async (resource) => {
+      const rootPath = resource && typeof resource.fsPath === 'string'
+        ? resource.fsPath
+        : await promptForLayoutFolder();
       if (rootPath) {
         await refreshFromPath(rootPath);
       }
+    }),
+    vscode.commands.registerCommand('ociExplorer.openLayoutFromExplorer', async (resource) => {
+      await vscode.commands.executeCommand('ociExplorer.openLayout', resource);
     }),
     vscode.commands.registerCommand('ociExplorer.refresh', async () => {
       const rootPath = context.workspaceState.get('ociExplorer.rootPath');
