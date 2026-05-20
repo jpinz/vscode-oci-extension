@@ -1,13 +1,11 @@
 {
-  "name": "vscode-oci-extension",
+  "name": "oci-layout-explorer",
   "displayName": "OCI Layout Explorer",
   "description": "Interactively explore container images saved as OCI image layouts.",
-  "version": "0.0.2",
-  "publisher": "jpinz",
+  "version": "0.0.1",
   "license": "GPL-3.0-only",
-  "type": "commonjs",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.120.0"
   },
   "categories": [
     "Other"
@@ -18,22 +16,8 @@
     "image",
     "explorer"
   ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/jpinz/vscode-oci-extension.git"
-  },
-  "bugs": {
-    "url": "https://github.com/jpinz/vscode-oci-extension/issues"
-  },
-  "homepage": "https://github.com/jpinz/vscode-oci-extension#readme",
-  "main": "./src/extension.js",
-  "activationEvents": [
-    "onView:ociExplorer.layout",
-    "onCommand:ociExplorer.openLayout",
-    "onCommand:ociExplorer.openLayoutFromExplorer",
-    "onCommand:ociExplorer.refresh",
-    "onCommand:ociExplorer.openRawFile"
-  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
@@ -58,10 +42,23 @@
         {
           "id": "ociExplorer.layout",
           "name": "OCI Layout Explorer",
+          "icon": "media/oci-layout.svg",
           "when": "config.ociExplorer.navigationMode != 'ui'"
         }
       ]
     },
+    "customEditors": [
+      {
+        "viewType": "ociExplorer.layoutEditor",
+        "displayName": "OCI Layout Editor",
+        "priority": "default",
+        "selector": [
+          {
+            "filenamePattern": "**/oci-layout"
+          }
+        ]
+      }
+    ],
     "configuration": {
       "title": "OCI Layout Explorer",
       "properties": {
@@ -75,10 +72,10 @@
           ],
           "enumDescriptions": [
             "Use only the VS Code tree view for OCI layout navigation.",
-            "Use only the OCI details webview UI for navigation.",
-            "Enable both the VS Code tree view and OCI details webview UI."
+            "Use only the OCI custom editor UI for navigation.",
+            "Enable both the VS Code tree view and OCI custom editor UI."
           ],
-          "description": "Choose whether OCI layout navigation uses the tree view, the details UI, or both."
+          "description": "Choose whether OCI layout navigation uses the tree view, the custom editor UI, or both."
         }
       }
     },
@@ -105,8 +102,22 @@
     }
   },
   "scripts": {
-    "build": "npm run lint",
-    "lint": "node --check src/*.js test/*.js",
-    "test": "node --test"
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "node --test out/test/**/*.test.js",
+    "test:vscode": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.120.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "typescript-eslint": "^8.56.1",
+    "eslint": "^9.39.3",
+    "typescript": "^5.9.3",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2"
   }
 }

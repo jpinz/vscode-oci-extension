@@ -1,19 +1,19 @@
-# vscode-oci-extension
+# OCI Layout Explorer
 
-An extension for Visual Studio Code to interactively explore Open Container Initiative (OCI) image layout folders.
+Visual Studio Code extension for exploring OCI image layout folders from both the Explorer tree and a custom editor view.
 
 ## Features
 
-- Open an OCI layout folder from the explorer view title.
+- Open an OCI layout folder from the view title action.
 - Browse `oci-layout`, `index.json`, manifests, configs, and layers in a linked tree.
-- See an interactive details panel that connects descriptors to their related files, similar to the flow on `explore.ggcr.dev`.
-- Open any linked OCI file directly from the details panel for raw inspection.
-- Show raw previews in the VS Code editor to use native rendering, syntax highlighting, and JSON folding.
-- Configure `ociExplorer.navigationMode` to use tree-only, UI-only, or both navigation experiences.
+- Open an `oci-layout` file in a custom editor that shows descriptor metadata and linked descriptors.
+- Open any linked OCI file directly for raw inspection.
+- Show raw previews in the VS Code editor using native rendering and JSON folding.
 
 ## Development
 
 ```sh
 npm run lint
+npm run compile
 npm test
 ```
