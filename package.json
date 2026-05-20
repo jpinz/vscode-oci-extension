@@ -2,7 +2,7 @@
   "name": "vscode-oci-extension",
   "displayName": "OCI Layout Explorer",
   "description": "Interactively explore container images saved as OCI image layouts.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "jpinz",
   "license": "GPL-3.0-only",
   "type": "commonjs",
