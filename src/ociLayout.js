@@ -66,12 +66,26 @@ function getPlatformLabel(source) {
   return source.os || source.architecture || null;
 }
 
+function getAttestationLabel(annotations) {
+  return annotations && annotations['vnd.docker.reference.type'] === 'attestation-manifest'
+    ? 'attestation manifest'
+    : null;
+}
+
 function getHumanReadableName(node) {
   if (node.kind === 'image-manifest') {
     return joinLabelParts([
       node.annotations && node.annotations['org.opencontainers.image.ref.name'],
-      getPlatformLabel(node.platform)
+      getPlatformLabel(node.platform) || getAttestationLabel(node.annotations)
     ]) || node.name;
+  }
+
+  if (node.kind === 'image-index') {
+    return node.mediaType === 'application/vnd.oci.image.index.v1+json'
+      && node.annotations
+      && node.annotations['io.containerd.image.name']
+      ? node.annotations['io.containerd.image.name']
+      : node.name;
   }
 
   if (node.kind === 'config') {
@@ -147,9 +161,9 @@ function createDescriptorNode(rootPath, descriptor, relationLabel, nodesByKey, t
 
   const childDescriptors = [];
   if (Array.isArray(node.json.manifests)) {
-    node.json.manifests.forEach((childDescriptor, index) => {
+    node.json.manifests.forEach((childDescriptor) => {
       childDescriptors.push({
-        relation: `manifest ${index + 1}`,
+        relation: 'manifest',
         descriptor: childDescriptor
       });
     });
@@ -232,10 +246,10 @@ function parseLayout(rootPath) {
     ? indexNode.json.manifests
     : [];
 
-  topLevelDescriptors.forEach((descriptor, index) => {
-    const childKey = createDescriptorNode(rootPath, descriptor, `manifest ${index + 1}`, nodesByKey, traversalStack);
+  topLevelDescriptors.forEach((descriptor) => {
+    const childKey = createDescriptorNode(rootPath, descriptor, 'manifest', nodesByKey, traversalStack);
     indexNode.children.push({
-      relation: `manifest ${index + 1}`,
+      relation: 'manifest',
       key: childKey
     });
   });
