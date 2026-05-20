@@ -9,6 +9,7 @@ An extension for Visual Studio Code to interactively explore Open Container Init
 - See an interactive details panel that connects descriptors to their related files, similar to the flow on `explore.ggcr.dev`.
 - Open any linked OCI file directly from the details panel for raw inspection.
 - Show raw previews in the VS Code editor to use native rendering, syntax highlighting, and JSON folding.
+- Configure `ociExplorer.navigationMode` to use tree-only, UI-only, or both navigation experiences.
 
 ## Development
 
