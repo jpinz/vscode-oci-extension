@@ -57,9 +57,30 @@
       "explorer": [
         {
           "id": "ociExplorer.layout",
-          "name": "OCI Layout Explorer"
+          "name": "OCI Layout Explorer",
+          "when": "config.ociExplorer.navigationMode != 'ui'"
         }
       ]
+    },
+    "configuration": {
+      "title": "OCI Layout Explorer",
+      "properties": {
+        "ociExplorer.navigationMode": {
+          "type": "string",
+          "default": "both",
+          "enum": [
+            "tree",
+            "ui",
+            "both"
+          ],
+          "enumDescriptions": [
+            "Use only the VS Code tree view for OCI layout navigation.",
+            "Use only the OCI details webview UI for navigation.",
+            "Enable both the VS Code tree view and OCI details webview UI."
+          ],
+          "description": "Choose whether OCI layout navigation uses the tree view, the details UI, or both."
+        }
+      }
     },
     "menus": {
       "explorer/context": [

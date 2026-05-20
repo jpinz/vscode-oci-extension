@@ -129,30 +129,44 @@ function isTrivyVulnerabilityPredicate(predicateType) {
   }
 }
 
+function getAttestationCategory(predicateType) {
+  if (typeof predicateType !== 'string' || !predicateType.trim()) {
+    return 'other';
+  }
+
+  const normalizedPredicateType = predicateType.toLowerCase();
+  if (isTrivyVulnerabilityPredicate(normalizedPredicateType)) {
+    return 'trivy';
+  }
+
+  if (isSlsaProvenancePredicate(normalizedPredicateType)) {
+    return 'provenance';
+  }
+
+  if (normalizedPredicateType.includes('spdx')
+    || normalizedPredicateType.includes('cyclonedx')
+    || normalizedPredicateType.includes('sbom')) {
+    return 'sbom';
+  }
+
+  const leafSegment = normalizedPredicateType.split('#').pop().split('/').pop();
+  return toSlug(leafSegment) || 'other';
+}
+
+function getAttestationLocation(predicateType) {
+  const category = getAttestationCategory(predicateType);
+  return category === 'other' ? 'attestations' : `attestations/${category}`;
+}
+
 function getInTotoDisplayLabel(node) {
   if (node.mediaType !== 'application/vnd.in-toto+json') {
     return null;
   }
 
   const predicateType = node.json && typeof node.json.predicateType === 'string'
-    ? node.json.predicateType.toLowerCase()
-    : '';
-  let baseLabel = 'attestation';
-
-  if (isSlsaProvenancePredicate(predicateType)) {
-    baseLabel = 'slsa provenance';
-  } else if (isTrivyVulnerabilityPredicate(predicateType)) {
-    baseLabel = 'Trivy Vulnerability Report';
-  } else if (predicateType.includes('spdx')) {
-    baseLabel = 'sbom (spdx)';
-  } else if (predicateType.includes('cyclonedx')) {
-    baseLabel = 'sbom (cyclonedx)';
-  } else if (predicateType) {
-    const leafSegment = predicateType.split('#').pop().split('/').pop();
-    baseLabel = joinLabelParts(['attestation', toSlug(leafSegment) || 'other']);
-  }
-
-  return withPlatformLabel(baseLabel, node.platform);
+    ? node.json.predicateType
+    : null;
+  return withPlatformLabel(getAttestationLocation(predicateType), node.platform);
 }
 
 function getHumanReadableName(node) {
@@ -165,9 +179,7 @@ function getHumanReadableName(node) {
     const attestationLabel = getAttestationLabel(node.annotations);
     if (attestationLabel) {
       const predicateType = getPredicateTypeAnnotation(node.annotations);
-      const baseLabel = predicateType
-        ? joinLabelParts([attestationLabel, predicateType])
-        : attestationLabel;
+      const baseLabel = predicateType ? getAttestationLocation(predicateType) : 'attestations';
       return withPlatformLabel(baseLabel, node.platform) || node.name;
     }
 

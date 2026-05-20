@@ -3,6 +3,10 @@ const vscode = require('vscode');
 const { parseLayout } = require('./ociLayout');
 
 const CONTEXT_UPDATE_DEBOUNCE_MS = 50;
+const NAVIGATION_MODE_SETTING = 'navigationMode';
+const NAVIGATION_MODE_TREE = 'tree';
+const NAVIGATION_MODE_UI = 'ui';
+const NAVIGATION_MODE_BOTH = 'both';
 
 class LayoutTreeItem extends vscode.TreeItem {
   constructor(node) {
@@ -79,15 +83,37 @@ class OciPanelController {
     this.focusKey = null;
   }
 
-  show(layout, focusKey, options = {}) {
-    const { reveal = true } = options;
+  setFocus(layout, focusKey) {
+    if (!layout || !layout.nodesByKey) {
+      return undefined;
+    }
+
+    const defaultKey = Array.isArray(layout.roots)
+      ? (layout.roots[1] ?? layout.roots[0])
+      : undefined;
+    const resolvedKey = focusKey || defaultKey;
+    const focusNode = resolvedKey ? layout.nodesByKey[resolvedKey] : undefined;
+    if (!focusNode) {
+      return undefined;
+    }
 
     this.currentLayout = layout;
-    const nextFocusKey = focusKey || layout.roots[1];
-
-    this.focusKey = nextFocusKey;
-    const focusNode = layout.nodesByKey[this.focusKey] || layout.nodesByKey[layout.roots[1]];
     this.focusKey = focusNode.key;
+    return focusNode;
+  }
+
+  hide() {
+    if (this.panel) {
+      this.panel.dispose();
+    }
+  }
+
+  show(layout, focusKey, options = {}) {
+    const { reveal = true } = options;
+    const focusNode = this.setFocus(layout, focusKey);
+    if (!focusNode) {
+      return;
+    }
 
     if (!this.panel) {
       const viewColumn = vscode.window.activeTextEditor && vscode.window.activeTextEditor.viewColumn
@@ -302,6 +328,23 @@ function getPanelTitle(layout, focusNode) {
   return `OCI Layout: ${path.basename(layout.rootPath)} • ${focusNode.label}`;
 }
 
+function getNavigationMode() {
+  const configuredMode = vscode.workspace.getConfiguration('ociExplorer').get(NAVIGATION_MODE_SETTING);
+  if ([NAVIGATION_MODE_TREE, NAVIGATION_MODE_UI, NAVIGATION_MODE_BOTH].includes(configuredMode)) {
+    return configuredMode;
+  }
+
+  return NAVIGATION_MODE_BOTH;
+}
+
+function getNavigationPreferences() {
+  const mode = getNavigationMode();
+  return {
+    showTreeView: mode === NAVIGATION_MODE_TREE || mode === NAVIGATION_MODE_BOTH,
+    showWebview: mode === NAVIGATION_MODE_UI || mode === NAVIGATION_MODE_BOTH
+  };
+}
+
 function renderWebviewHtml(layout, focusKey, cspSource) {
   const focusNode = layout.nodesByKey[focusKey] || layout.nodesByKey[layout.roots[1]];
   const summaryCards = [
@@ -469,6 +512,13 @@ function activate(context) {
   const treeProvider = new OciTreeProvider((nodeKey) => panelController.show(treeProvider.layout, nodeKey));
   let contextUpdateTimer = null;
 
+  const applyNavigationPreferences = () => {
+    const { showWebview } = getNavigationPreferences();
+    if (!showWebview) {
+      panelController.hide();
+    }
+  };
+
   const uriHasType = async (uri, type) => {
     try {
       return (await vscode.workspace.fs.stat(uri)).type === type;
@@ -521,7 +571,11 @@ function activate(context) {
       const layout = parseLayout(rootPath);
       treeProvider.setLayout(layout);
       await context.workspaceState.update('ociExplorer.rootPath', rootPath);
-      panelController.show(layout, preferredKey || layout.roots[1]);
+      if (getNavigationPreferences().showWebview) {
+        panelController.show(layout, preferredKey);
+      } else {
+        panelController.setFocus(layout, preferredKey);
+      }
     } catch (error) {
       vscode.window.showErrorMessage(error.message);
     }
@@ -533,6 +587,7 @@ function activate(context) {
   }
 
   scheduleLayoutFolderContextUpdate();
+  applyNavigationPreferences();
 
   const treeView = vscode.window.createTreeView('ociExplorer.layout', {
     treeDataProvider: treeProvider,
@@ -576,7 +631,11 @@ function activate(context) {
       if (!treeProvider.layout || !treeProvider.layout.nodesByKey[nodeKey]) {
         return;
       }
-      panelController.show(treeProvider.layout, nodeKey);
+      if (getNavigationPreferences().showWebview) {
+        panelController.show(treeProvider.layout, nodeKey);
+      } else {
+        panelController.setFocus(treeProvider.layout, nodeKey);
+      }
     }),
     vscode.commands.registerCommand('ociExplorer.openRawFile', async (node) => {
       if (node && node.filePath) {
@@ -592,7 +651,26 @@ function activate(context) {
     treeView.onDidChangeSelection(async (event) => {
       const [node] = event.selection;
       if (node && treeProvider.layout && treeProvider.layout.nodesByKey[node.key]) {
-        panelController.show(treeProvider.layout, node.key);
+        if (getNavigationPreferences().showWebview) {
+          panelController.show(treeProvider.layout, node.key);
+        } else {
+          panelController.setFocus(treeProvider.layout, node.key);
+        }
+      }
+    }),
+    vscode.workspace.onDidChangeConfiguration(async (event) => {
+      if (!event.affectsConfiguration(`ociExplorer.${NAVIGATION_MODE_SETTING}`)) {
+        return;
+      }
+
+      applyNavigationPreferences();
+      const rootPath = context.workspaceState.get('ociExplorer.rootPath');
+      if (!rootPath) {
+        return;
+      }
+
+      if (getNavigationPreferences().showWebview) {
+        await refreshFromPath(rootPath, panelController.focusKey);
       }
     })
   );
