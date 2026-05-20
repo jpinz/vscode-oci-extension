@@ -117,6 +117,9 @@ class OciPanelController {
 
 function describeNode(node) {
   const details = [node.kind];
+  if (node.relationLabel && node.relationLabel !== node.label) {
+    details.push(node.relationLabel);
+  }
   if (node.mediaType) {
     details.push(node.mediaType.replace(/^application\/vnd\./, ''));
   }
@@ -184,13 +187,15 @@ function escapeHtml(value) {
 
 function renderNodeButton(node, relation) {
   return `<button class="link-button" data-action="focus" data-key="${escapeHtml(node.key)}">
-    <span>${escapeHtml(relation || node.label)}</span>
-    <small>${escapeHtml(node.kind)}</small>
+    <span>${escapeHtml(node.label)}</span>
+    <small>${escapeHtml(relation && relation !== node.label ? `${relation} • ${node.kind}` : node.kind)}</small>
   </button>`;
 }
 
 function renderMetadataTable(node) {
   const rows = [
+    ['Friendly name', node.label],
+    ['OCI role', node.relationLabel || '—'],
     ['Kind', node.kind],
     ['Media type', node.mediaType || '—'],
     ['Digest', node.digest || '—'],

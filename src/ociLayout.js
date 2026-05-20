@@ -50,7 +50,48 @@ function getReadableKind(mediaType, json) {
   return 'blob';
 }
 
+function joinLabelParts(parts) {
+  return parts.filter(Boolean).join(' • ');
+}
+
+function getPlatformLabel(source) {
+  if (!source || typeof source !== 'object' || (!source.os && !source.architecture)) {
+    return null;
+  }
+
+  const variant = source.variant ? `/${source.variant}` : '';
+  return `${source.os || 'unknown'}/${source.architecture || 'unknown'}${variant}`;
+}
+
+function getHumanReadableName(node) {
+  if (node.kind === 'image-manifest') {
+    return joinLabelParts([
+      node.annotations && node.annotations['org.opencontainers.image.ref.name'],
+      getPlatformLabel(node.platform)
+    ]) || node.name;
+  }
+
+  if (node.kind === 'config') {
+    return joinLabelParts([
+      'runtime config',
+      getPlatformLabel(node.json)
+    ]) || node.name;
+  }
+
+  if (node.kind === 'layer') {
+    return node.annotations && node.annotations['org.opencontainers.image.title']
+      ? `layer • ${node.annotations['org.opencontainers.image.title']}`
+      : node.name;
+  }
+
+  return node.name;
+}
+
 function getNodeLabel(node) {
+  if (node.displayName) {
+    return node.displayName;
+  }
+
   if (node.name) {
     return node.name;
   }
@@ -79,12 +120,14 @@ function createDescriptorNode(rootPath, descriptor, relationLabel, nodesByKey, t
   const node = {
     key,
     name: relationLabel,
+    relationLabel,
     kind: getReadableKind(descriptor.mediaType, json && !json.__parseError ? json : null),
     digest,
     mediaType: descriptor.mediaType || null,
     size: descriptor.size || null,
     annotations: descriptor.annotations || null,
     artifactType: descriptor.artifactType || null,
+    platform: descriptor.platform || null,
     filePath,
     exists,
     json: json && !json.__parseError ? json : null,
@@ -195,10 +238,17 @@ function parseLayout(rootPath) {
     });
   });
 
-  const nodes = Array.from(nodesByKey.values()).map((node) => ({
-    ...node,
-    label: getNodeLabel(node)
-  }));
+  const nodes = Array.from(nodesByKey.values()).map((node) => {
+    const enrichedNode = {
+      ...node,
+      displayName: getHumanReadableName(node)
+    };
+
+    return {
+      ...enrichedNode,
+      label: getNodeLabel(enrichedNode)
+    };
+  });
 
   return {
     rootPath,
