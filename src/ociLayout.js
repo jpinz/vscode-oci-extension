@@ -99,6 +99,16 @@ function toSlug(value) {
     .replace(/^-+|-+$/g, '');
 }
 
+function isSlsaProvenancePredicate(predicateType) {
+  try {
+    const parsed = new URL(predicateType);
+    return parsed.hostname === 'slsa.dev'
+      && (parsed.pathname === '/provenance/v1' || parsed.pathname === '/provenance/v0.2');
+  } catch (error) {
+    return false;
+  }
+}
+
 function getInTotoDisplayLabel(node) {
   if (node.mediaType !== 'application/vnd.in-toto+json') {
     return null;
@@ -109,7 +119,7 @@ function getInTotoDisplayLabel(node) {
     : '';
   let baseLabel = 'attestation';
 
-  if (predicateType.includes('https://slsa.dev/provenance/v1') || predicateType.includes('https://slsa.dev/provenance/v0.2')) {
+  if (isSlsaProvenancePredicate(predicateType)) {
     baseLabel = 'slsa provenance';
   } else if (predicateType.includes('spdx')) {
     baseLabel = 'sbom (spdx)';
