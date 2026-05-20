@@ -117,7 +117,7 @@ class OciPanelController {
 
 function describeNode(node) {
   const details = [node.kind];
-  if (node.relationLabel && node.relationLabel !== node.label) {
+  if (node.relationLabel && node.relationLabel !== (node.displayName || node.name)) {
     details.push(node.relationLabel);
   }
   if (node.mediaType) {
@@ -188,7 +188,7 @@ function escapeHtml(value) {
 function renderNodeButton(node, relation) {
   return `<button class="link-button" data-action="focus" data-key="${escapeHtml(node.key)}">
     <span>${escapeHtml(node.label)}</span>
-    <small>${escapeHtml(relation && relation !== node.label ? `${relation} • ${node.kind}` : node.kind)}</small>
+    <small>${escapeHtml(relation && relation !== (node.displayName || node.name) ? `${relation} • ${node.kind}` : node.kind)}</small>
   </button>`;
 }
 
