@@ -470,12 +470,12 @@ function activate(context) {
 
   const updateLayoutFolderContext = async () => {
     const layoutFiles = await vscode.workspace.findFiles('**/oci-layout', '**/node_modules/**');
-    const layoutFolders = {};
+    const layoutFolders = [];
 
     const folderChecks = layoutFiles.map(async (layoutFile) => {
       const rootPath = path.dirname(layoutFile.fsPath);
       if (await isOciLayoutFolderUri(vscode.Uri.file(rootPath))) {
-        layoutFolders[rootPath] = true;
+        layoutFolders.push(rootPath);
       }
     });
 
