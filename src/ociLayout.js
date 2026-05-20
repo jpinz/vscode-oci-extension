@@ -88,6 +88,16 @@ function getAttestationLabel(annotations) {
     : null;
 }
 
+function getPredicateTypeAnnotation(annotations) {
+  if (!annotations || typeof annotations !== 'object') {
+    return null;
+  }
+
+  return typeof annotations['in-toto.io/predicate-type'] === 'string'
+    ? annotations['in-toto.io/predicate-type']
+    : null;
+}
+
 function withPlatformLabel(baseLabel, platform) {
   return joinLabelParts([baseLabel, getPlatformLabel(platform)]);
 }
@@ -95,8 +105,8 @@ function withPlatformLabel(baseLabel, platform) {
 function toSlug(value) {
   return String(value)
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+    .replace(/[^a-z0-9.]+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '');
 }
 
 function isSlsaProvenancePredicate(predicateType) {
@@ -104,6 +114,16 @@ function isSlsaProvenancePredicate(predicateType) {
     const parsed = new URL(predicateType);
     return parsed.hostname === 'slsa.dev'
       && (parsed.pathname === '/provenance/v1' || parsed.pathname === '/provenance/v0.2');
+  } catch (error) {
+    return false;
+  }
+}
+
+function isTrivyVulnerabilityPredicate(predicateType) {
+  try {
+    const parsed = new URL(predicateType);
+    return parsed.hostname === 'trivy.dev'
+      && parsed.pathname.startsWith('/attestations/vulnerability/');
   } catch (error) {
     return false;
   }
@@ -121,6 +141,8 @@ function getInTotoDisplayLabel(node) {
 
   if (isSlsaProvenancePredicate(predicateType)) {
     baseLabel = 'slsa provenance';
+  } else if (isTrivyVulnerabilityPredicate(predicateType)) {
+    baseLabel = 'Trivy Vulnerability Report';
   } else if (predicateType.includes('spdx')) {
     baseLabel = 'sbom (spdx)';
   } else if (predicateType.includes('cyclonedx')) {
@@ -142,7 +164,11 @@ function getHumanReadableName(node) {
   if (node.kind === 'image-manifest') {
     const attestationLabel = getAttestationLabel(node.annotations);
     if (attestationLabel) {
-      return withPlatformLabel(attestationLabel, node.platform) || node.name;
+      const predicateType = getPredicateTypeAnnotation(node.annotations);
+      const baseLabel = predicateType
+        ? joinLabelParts([attestationLabel, predicateType])
+        : attestationLabel;
+      return withPlatformLabel(baseLabel, node.platform) || node.name;
     }
 
     return joinLabelParts([

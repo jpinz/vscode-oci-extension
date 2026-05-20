@@ -12,7 +12,8 @@
     {
       "mediaType": "application/vnd.oci.image.manifest.v1+json",
       "annotations": {
-        "vnd.docker.reference.type": "attestation-manifest"
+        "vnd.docker.reference.type": "attestation-manifest",
+        "in-toto.io/predicate-type": "https://spdx.dev/Document"
       },
       "digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
       "size": 222

@@ -77,20 +77,13 @@ class OciPanelController {
     this.panel = null;
     this.currentLayout = null;
     this.focusKey = null;
-    this.history = [];
   }
 
   show(layout, focusKey, options = {}) {
-    const { addToHistory = false, resetHistory = false, reveal = true } = options;
+    const { reveal = true } = options;
 
     this.currentLayout = layout;
     const nextFocusKey = focusKey || layout.roots[1];
-
-    if (resetHistory) {
-      this.history = [];
-    } else if (addToHistory && this.focusKey && this.focusKey !== nextFocusKey) {
-      this.history.push(this.focusKey);
-    }
 
     this.focusKey = nextFocusKey;
     const focusNode = layout.nodesByKey[this.focusKey] || layout.nodesByKey[layout.roots[1]];
@@ -113,17 +106,12 @@ class OciPanelController {
         }
 
         if (message.command === 'focusNode' && message.key && this.currentLayout.nodesByKey[message.key]) {
-          this.show(this.currentLayout, message.key, { addToHistory: true, reveal: false });
-          return;
-        }
-
-        if (message.command === 'goBack') {
-          this.goBack();
+          this.show(this.currentLayout, message.key, { reveal: false });
           return;
         }
 
         if (message.command === 'goHome') {
-          this.show(this.currentLayout, this.currentLayout.roots[1], { addToHistory: true, reveal: false });
+          this.show(this.currentLayout, this.currentLayout.roots[1], { reveal: false });
           return;
         }
 
@@ -145,9 +133,7 @@ class OciPanelController {
     }
 
     this.panel.title = getPanelTitle(layout, focusNode);
-    this.panel.webview.html = renderWebviewHtml(layout, this.focusKey, this.panel.webview.cspSource, {
-      canGoBack: this.history.length > 0
-    });
+    this.panel.webview.html = renderWebviewHtml(layout, this.focusKey, this.panel.webview.cspSource);
     openNodePreview(focusNode).catch((error) => {
       console.error('Failed to open OCI raw preview.', error);
     });
@@ -157,14 +143,6 @@ class OciPanelController {
     }
   }
 
-  goBack() {
-    if (!this.currentLayout || this.history.length === 0) {
-      return;
-    }
-
-    const previousKey = this.history.pop();
-    this.show(this.currentLayout, previousKey, { reveal: false });
-  }
 }
 
 function describeNode(node) {
@@ -324,9 +302,8 @@ function getPanelTitle(layout, focusNode) {
   return `OCI Layout: ${path.basename(layout.rootPath)} • ${focusNode.label}`;
 }
 
-function renderWebviewHtml(layout, focusKey, cspSource, options = {}) {
+function renderWebviewHtml(layout, focusKey, cspSource) {
   const focusNode = layout.nodesByKey[focusKey] || layout.nodesByKey[layout.roots[1]];
-  const { canGoBack = false } = options;
   const summaryCards = [
     ['Root folder', layout.rootPath],
     ['Layout version', layout.layoutVersion || 'unknown'],
@@ -443,8 +420,7 @@ function renderWebviewHtml(layout, focusKey, cspSource, options = {}) {
         <section class="card">
           <h2>Navigation</h2>
           <div class="toolbar">
-            <button class="action-button secondary" data-action="back" ${canGoBack ? '' : 'disabled'}>Back</button>
-            <button class="action-button secondary" data-action="home" data-key="${escapeHtml(layout.roots[1])}">Home/Root/Index</button>
+            <button class="action-button secondary" data-action="home" data-key="${escapeHtml(layout.roots[1])}">Root</button>
           </div>
           <h3>Raw preview</h3>
           ${canPreview
@@ -465,13 +441,11 @@ function renderWebviewHtml(layout, focusKey, cspSource, options = {}) {
 
           const command = target.dataset.action === 'focus'
             ? 'focusNode'
-            : target.dataset.action === 'back'
-              ? 'goBack'
-              : target.dataset.action === 'home'
-                ? 'goHome'
-                : target.dataset.action === 'preview'
-                  ? 'openPreview'
-                : 'openFile';
+            : target.dataset.action === 'home'
+              ? 'goHome'
+              : target.dataset.action === 'preview'
+                ? 'openPreview'
+              : 'openFile';
           vscode.postMessage({ command, key: target.dataset.key });
         });
       </script>
@@ -515,12 +489,12 @@ function activate(context) {
 
   const updateLayoutFolderContext = async () => {
     const layoutFiles = await vscode.workspace.findFiles('**/oci-layout', '**/node_modules/**');
-    const layoutFolders = {};
+    const layoutFolders = [];
 
     const folderChecks = layoutFiles.map(async (layoutFile) => {
       const rootPath = path.dirname(layoutFile.fsPath);
       if (await isOciLayoutFolderUri(vscode.Uri.file(rootPath))) {
-        layoutFolders[rootPath] = true;
+        layoutFolders.push(rootPath);
       }
     });
 
@@ -547,7 +521,7 @@ function activate(context) {
       const layout = parseLayout(rootPath);
       treeProvider.setLayout(layout);
       await context.workspaceState.update('ociExplorer.rootPath', rootPath);
-      panelController.show(layout, preferredKey || layout.roots[1], { resetHistory: true });
+      panelController.show(layout, preferredKey || layout.roots[1]);
     } catch (error) {
       vscode.window.showErrorMessage(error.message);
     }
@@ -602,7 +576,7 @@ function activate(context) {
       if (!treeProvider.layout || !treeProvider.layout.nodesByKey[nodeKey]) {
         return;
       }
-      panelController.show(treeProvider.layout, nodeKey, { addToHistory: true });
+      panelController.show(treeProvider.layout, nodeKey);
     }),
     vscode.commands.registerCommand('ociExplorer.openRawFile', async (node) => {
       if (node && node.filePath) {
@@ -618,7 +592,7 @@ function activate(context) {
     treeView.onDidChangeSelection(async (event) => {
       const [node] = event.selection;
       if (node && treeProvider.layout && treeProvider.layout.nodesByKey[node.key]) {
-        panelController.show(treeProvider.layout, node.key, { addToHistory: true });
+        panelController.show(treeProvider.layout, node.key);
       }
     })
   );
