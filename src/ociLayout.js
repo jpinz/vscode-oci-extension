@@ -95,8 +95,8 @@ function withPlatformLabel(baseLabel, platform) {
 function toSlug(value) {
   return String(value)
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+    .replace(/[^a-z0-9.]+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '');
 }
 
 function isSlsaProvenancePredicate(predicateType) {

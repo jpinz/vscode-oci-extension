@@ -90,7 +90,7 @@ test('parseLayout categorizes in-toto statements and docker configs for display 
     'slsa provenance • linux/amd64',
     'sbom (spdx) • linux/arm64',
     'sbom (cyclonedx)',
-    'attestation • custom-v1',
+    'attestation • v0.1',
     'image config • linux/s390x'
   ]);
 });
