@@ -1,0 +1,79 @@
+{
+  "name": "vscode-oci-extension",
+  "displayName": "OCI Layout Explorer",
+  "description": "Interactively explore container images saved as OCI image layouts.",
+  "version": "0.0.1",
+  "publisher": "jpinz",
+  "license": "GPL-3.0-only",
+  "type": "commonjs",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "oci",
+    "container",
+    "image",
+    "explorer"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jpinz/vscode-oci-extension.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jpinz/vscode-oci-extension/issues"
+  },
+  "homepage": "https://github.com/jpinz/vscode-oci-extension#readme",
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onView:ociExplorer.layout",
+    "onCommand:ociExplorer.openLayout",
+    "onCommand:ociExplorer.refresh",
+    "onCommand:ociExplorer.openRawFile"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "ociExplorer.openLayout",
+        "title": "Open OCI Layout Folder"
+      },
+      {
+        "command": "ociExplorer.refresh",
+        "title": "Refresh OCI Layout"
+      },
+      {
+        "command": "ociExplorer.openRawFile",
+        "title": "Open OCI File"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "ociExplorer.layout",
+          "name": "OCI Layout Explorer"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "ociExplorer.openLayout",
+          "when": "view == ociExplorer.layout",
+          "group": "navigation"
+        },
+        {
+          "command": "ociExplorer.refresh",
+          "when": "view == ociExplorer.layout",
+          "group": "navigation@1"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "npm run lint",
+    "lint": "node --check src/*.js test/*.js",
+    "test": "node --test"
+  }
+}
