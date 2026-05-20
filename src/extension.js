@@ -117,8 +117,8 @@ class OciPanelController {
 
 function describeNode(node) {
   const details = [node.kind];
-  if (node.relationName && node.relationName !== (node.displayName || node.name)) {
-    details.push(node.relationName);
+  if (node.name && node.name !== getNodePrimaryName(node)) {
+    details.push(node.name);
   }
   if (node.mediaType) {
     details.push(node.mediaType.replace(/^application\/vnd\./, ''));
@@ -194,11 +194,15 @@ function renderNodeButton(node, relation) {
 }
 
 function getNodeSubtext(node, relation) {
-  if (relation && relation !== (node.displayName || node.name)) {
+  if (relation && relation !== getNodePrimaryName(node)) {
     return `${relation} • ${node.kind}`;
   }
 
   return node.kind;
+}
+
+function getNodePrimaryName(node) {
+  return node.displayName || node.name;
 }
 
 function renderMetadataTable(node) {
@@ -210,11 +214,11 @@ function renderMetadataTable(node) {
     ['Path', node.filePath || '—']
   ];
 
-  if (node.displayName && node.displayName !== node.relationName) {
+  if (node.displayName && node.displayName !== node.name) {
     rows.unshift(['Display name', node.label]);
   }
 
-  rows.unshift(['OCI relation', node.relationName || '—']);
+  rows.unshift(['OCI relation', node.name || '—']);
 
   return `<table>${rows.map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`).join('')}</table>`;
 }
