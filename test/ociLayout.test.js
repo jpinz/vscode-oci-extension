@@ -1,7 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
-const { digestToPath, parseLayout } = require('../src/ociLayout');
+const { digestToPath, isOciLayoutFolder, parseLayout } = require('../src/ociLayout');
 
 const fixturePath = path.join(__dirname, 'fixtures', 'sample-layout');
 
@@ -35,4 +37,17 @@ test('parseLayout links the image index, manifest, config, and layers', () => {
   assert.equal(layerNode.kind, 'layer');
   assert.equal(layerNode.label, 'layer • app/bin/demo');
   assert.match(layerNode.filePath, /blobs[\\/]+sha256[\\/]+3333333333333333333333333333333333333333333333333333333333333333$/);
+});
+
+test('isOciLayoutFolder requires layout markers and the blobs directory', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'oci-layout-test-'));
+  fs.writeFileSync(path.join(tempRoot, 'oci-layout'), '{"imageLayoutVersion":"1.0.0"}');
+  fs.writeFileSync(path.join(tempRoot, 'index.json'), '{"schemaVersion":2,"manifests":[]}');
+
+  assert.equal(isOciLayoutFolder(tempRoot), false);
+  assert.throws(() => parseLayout(tempRoot), /is not an OCI layout folder/);
+
+  fs.mkdirSync(path.join(tempRoot, 'blobs'));
+
+  assert.equal(isOciLayoutFolder(tempRoot), true);
 });

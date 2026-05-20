@@ -30,6 +30,7 @@
   "activationEvents": [
     "onView:ociExplorer.layout",
     "onCommand:ociExplorer.openLayout",
+    "onCommand:ociExplorer.openLayoutFromExplorer",
     "onCommand:ociExplorer.refresh",
     "onCommand:ociExplorer.openRawFile"
   ],
@@ -38,6 +39,10 @@
       {
         "command": "ociExplorer.openLayout",
         "title": "Open OCI Layout Folder"
+      },
+      {
+        "command": "ociExplorer.openLayoutFromExplorer",
+        "title": "Open as OCI Layout"
       },
       {
         "command": "ociExplorer.refresh",
@@ -57,6 +62,13 @@
       ]
     },
     "menus": {
+      "explorer/context": [
+        {
+          "command": "ociExplorer.openLayoutFromExplorer",
+          "when": "explorerResourceIsFolder && resourceFsPath in ociExplorer.layoutFolders",
+          "group": "navigation"
+        }
+      ],
       "view/title": [
         {
           "command": "ociExplorer.openLayout",
