@@ -330,9 +330,7 @@ function getPanelTitle(layout, focusNode) {
 
 function getNavigationMode() {
   const configuredMode = vscode.workspace.getConfiguration('ociExplorer').get(NAVIGATION_MODE_SETTING);
-  if (configuredMode === NAVIGATION_MODE_TREE
-    || configuredMode === NAVIGATION_MODE_UI
-    || configuredMode === NAVIGATION_MODE_BOTH) {
+  if ([NAVIGATION_MODE_TREE, NAVIGATION_MODE_UI, NAVIGATION_MODE_BOTH].includes(configuredMode)) {
     return configuredMode;
   }
 
@@ -573,9 +571,10 @@ function activate(context) {
       const layout = parseLayout(rootPath);
       treeProvider.setLayout(layout);
       await context.workspaceState.update('ociExplorer.rootPath', rootPath);
-      const focusNode = panelController.setFocus(layout, preferredKey);
-      if (getNavigationPreferences().showWebview && focusNode) {
-        panelController.show(layout, focusNode.key);
+      if (getNavigationPreferences().showWebview) {
+        panelController.show(layout, preferredKey);
+      } else {
+        panelController.setFocus(layout, preferredKey);
       }
     } catch (error) {
       vscode.window.showErrorMessage(error.message);
@@ -632,9 +631,10 @@ function activate(context) {
       if (!treeProvider.layout || !treeProvider.layout.nodesByKey[nodeKey]) {
         return;
       }
-      panelController.setFocus(treeProvider.layout, nodeKey);
       if (getNavigationPreferences().showWebview) {
         panelController.show(treeProvider.layout, nodeKey);
+      } else {
+        panelController.setFocus(treeProvider.layout, nodeKey);
       }
     }),
     vscode.commands.registerCommand('ociExplorer.openRawFile', async (node) => {
@@ -651,9 +651,10 @@ function activate(context) {
     treeView.onDidChangeSelection(async (event) => {
       const [node] = event.selection;
       if (node && treeProvider.layout && treeProvider.layout.nodesByKey[node.key]) {
-        panelController.setFocus(treeProvider.layout, node.key);
         if (getNavigationPreferences().showWebview) {
           panelController.show(treeProvider.layout, node.key);
+        } else {
+          panelController.setFocus(treeProvider.layout, node.key);
         }
       }
     }),

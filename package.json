@@ -58,7 +58,7 @@
         {
           "id": "ociExplorer.layout",
           "name": "OCI Layout Explorer",
-          "when": "config.ociExplorer.navigationMode != ui"
+          "when": "config.ociExplorer.navigationMode != 'ui'"
         }
       ]
     },
