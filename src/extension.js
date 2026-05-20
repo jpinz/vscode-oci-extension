@@ -203,14 +203,18 @@ function getNodeSubtext(node, relation) {
 
 function renderMetadataTable(node) {
   const rows = [
-    ['Friendly name', node.label],
-    ['OCI relation', node.relationName || '—'],
     ['Kind', node.kind],
     ['Media type', node.mediaType || '—'],
     ['Digest', node.digest || '—'],
     ['Size', node.size == null ? '—' : `${node.size} bytes`],
     ['Path', node.filePath || '—']
   ];
+
+  if (node.displayName && node.displayName !== node.relationName) {
+    rows.unshift(['Friendly name', node.label]);
+  }
+
+  rows.unshift(['OCI relation', node.relationName || '—']);
 
   return `<table>${rows.map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`).join('')}</table>`;
 }

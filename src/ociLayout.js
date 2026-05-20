@@ -55,7 +55,7 @@ function joinLabelParts(parts) {
 }
 
 function getPlatformLabel(source) {
-  if (!source || typeof source !== 'object' || (!source.os && !source.architecture)) {
+  if (!source || typeof source !== 'object') {
     return null;
   }
 
