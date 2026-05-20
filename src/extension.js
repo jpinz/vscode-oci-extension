@@ -382,7 +382,7 @@ function renderWebviewHtml(layout, focusKey, cspSource) {
         <section class="card">
           <h2>Navigation</h2>
           <div class="toolbar">
-            <button class="action-button secondary" data-action="home" data-key="${escapeHtml(layout.roots[1])}">Home/Root/Index</button>
+            <button class="action-button secondary" data-action="home" data-key="${escapeHtml(layout.roots[1])}">Root</button>
           </div>
           <h3>Raw preview</h3>
           ${rawJson ? `<pre>${escapeHtml(rawJson)}</pre>` : '<p class="empty">Binary or non-JSON content; use "Open raw file" to inspect it directly.</p>'}
