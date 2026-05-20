@@ -2,6 +2,8 @@ const path = require('node:path');
 const vscode = require('vscode');
 const { parseLayout } = require('./ociLayout');
 
+const CONTEXT_UPDATE_DEBOUNCE_MS = 50;
+
 class LayoutTreeItem extends vscode.TreeItem {
   constructor(node) {
     super(
@@ -393,12 +395,13 @@ function activate(context) {
   };
 
   const isOciLayoutFolderUri = async (rootUri) => {
-    const [hasIndex, hasBlobs] = await Promise.all([
+    const [hasLayout, hasIndex, hasBlobs] = await Promise.all([
+      uriHasType(vscode.Uri.joinPath(rootUri, 'oci-layout'), vscode.FileType.File),
       uriHasType(vscode.Uri.joinPath(rootUri, 'index.json'), vscode.FileType.File),
       uriHasType(vscode.Uri.joinPath(rootUri, 'blobs'), vscode.FileType.Directory)
     ]);
 
-    return hasIndex && hasBlobs;
+    return hasLayout && hasIndex && hasBlobs;
   };
 
   const updateLayoutFolderContext = async () => {
@@ -422,7 +425,7 @@ function activate(context) {
       updateLayoutFolderContext().catch((error) => {
         console.error('Failed to refresh OCI layout folder context.', error);
       });
-    }, 50);
+    }, CONTEXT_UPDATE_DEBOUNCE_MS);
   };
 
   const refreshFromPath = async (rootPath, preferredKey) => {

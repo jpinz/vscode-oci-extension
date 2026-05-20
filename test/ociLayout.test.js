@@ -42,9 +42,13 @@ test('parseLayout links the image index, manifest, config, and layers', () => {
 test('isOciLayoutFolder requires layout markers and the blobs directory', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'oci-layout-test-'));
   try {
-    fs.writeFileSync(path.join(tempRoot, 'oci-layout'), '{"imageLayoutVersion":"1.0.0"}');
-    fs.writeFileSync(path.join(tempRoot, 'index.json'), '{"schemaVersion":2,"manifests":[]}');
+    assert.equal(isOciLayoutFolder(tempRoot), false);
+    assert.throws(() => parseLayout(tempRoot), /is not an OCI layout folder/);
 
+    fs.writeFileSync(path.join(tempRoot, 'oci-layout'), '{"imageLayoutVersion":"1.0.0"}');
+    assert.equal(isOciLayoutFolder(tempRoot), false);
+
+    fs.writeFileSync(path.join(tempRoot, 'index.json'), '{"schemaVersion":2,"manifests":[]}');
     assert.equal(isOciLayoutFolder(tempRoot), false);
     assert.throws(() => parseLayout(tempRoot), /is not an OCI layout folder/);
 
