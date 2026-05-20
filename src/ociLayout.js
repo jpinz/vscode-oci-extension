@@ -45,7 +45,9 @@ function getReadableKind(mediaType, json) {
     return 'image-manifest';
   }
 
-  if (mediaType && mediaType.includes('config')) {
+  if (mediaType === 'application/vnd.oci.image.config.v1+json'
+    || mediaType === 'application/vnd.docker.container.image.v1+json'
+    || (mediaType && mediaType.includes('config'))) {
     return 'config';
   }
 
@@ -86,11 +88,56 @@ function getAttestationLabel(annotations) {
     : null;
 }
 
+function withPlatformLabel(baseLabel, platform) {
+  return joinLabelParts([baseLabel, getPlatformLabel(platform)]);
+}
+
+function toSlug(value) {
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function getInTotoDisplayLabel(node) {
+  if (node.mediaType !== 'application/vnd.in-toto+json') {
+    return null;
+  }
+
+  const predicateType = node.json && typeof node.json.predicateType === 'string'
+    ? node.json.predicateType.toLowerCase()
+    : '';
+  let baseLabel = 'attestation';
+
+  if (predicateType.includes('https://slsa.dev/provenance/v1') || predicateType.includes('https://slsa.dev/provenance/v0.2')) {
+    baseLabel = 'slsa provenance';
+  } else if (predicateType.includes('spdx')) {
+    baseLabel = 'sbom (spdx)';
+  } else if (predicateType.includes('cyclonedx')) {
+    baseLabel = 'sbom (cyclonedx)';
+  } else if (predicateType) {
+    const leafSegment = predicateType.split('#').pop().split('/').pop();
+    baseLabel = joinLabelParts(['attestation', toSlug(leafSegment) || 'other']);
+  }
+
+  return withPlatformLabel(baseLabel, node.platform);
+}
+
 function getHumanReadableName(node) {
+  const inTotoLabel = getInTotoDisplayLabel(node);
+  if (inTotoLabel) {
+    return inTotoLabel;
+  }
+
   if (node.kind === 'image-manifest') {
+    const attestationLabel = getAttestationLabel(node.annotations);
+    if (attestationLabel) {
+      return withPlatformLabel(attestationLabel, node.platform) || node.name;
+    }
+
     return joinLabelParts([
       node.annotations && node.annotations['org.opencontainers.image.ref.name'],
-      getPlatformLabel(node.platform) || getAttestationLabel(node.annotations)
+      getPlatformLabel(node.platform)
     ]) || node.name;
   }
 
@@ -100,14 +147,15 @@ function getHumanReadableName(node) {
       ? node.annotations['io.containerd.image.name']
       : null;
 
-    return imageName || node.name;
+    if (imageName) {
+      return imageName;
+    }
+
+    return node.name === 'index.json' ? node.name : 'image index';
   }
 
   if (node.kind === 'config') {
-    return joinLabelParts([
-      'runtime config',
-      getPlatformLabel(node.json)
-    ]) || node.name;
+    return withPlatformLabel('image config', node.json) || node.name;
   }
 
   if (node.kind === 'layer') {

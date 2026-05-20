@@ -7,6 +7,7 @@ const { digestToPath, isOciLayoutFolder, parseLayout } = require('../src/ociLayo
 
 const fixturePath = path.join(__dirname, 'fixtures', 'sample-layout');
 const richFixturePath = path.join(__dirname, 'fixtures', 'rich-layout');
+const attestationFixturePath = path.join(__dirname, 'fixtures', 'attestation-layout');
 
 test('digestToPath maps blob digests into OCI blob paths', () => {
   assert.equal(
@@ -34,7 +35,7 @@ test('parseLayout links the image index, manifest, config, and layers', () => {
 
   const configNode = layout.nodesByKey[manifestNode.children[0].key];
   assert.equal(configNode.kind, 'config');
-  assert.equal(configNode.label, 'runtime config • linux/amd64');
+  assert.equal(configNode.label, 'image config • linux/amd64');
 
   const layerNode = layout.nodesByKey[manifestNode.children[1].key];
   assert.equal(layerNode.kind, 'layer');
@@ -78,4 +79,18 @@ test('isOciLayoutFolder requires layout markers and the blobs directory', () => 
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
+});
+
+test('parseLayout categorizes in-toto statements and docker configs for display labels', () => {
+  const layout = parseLayout(attestationFixturePath);
+  const indexNode = layout.nodesByKey['index-file'];
+  const labels = indexNode.children.map((child) => layout.nodesByKey[child.key].label);
+
+  assert.deepEqual(labels, [
+    'slsa provenance • linux/amd64',
+    'sbom (spdx) • linux/arm64',
+    'sbom (cyclonedx)',
+    'attestation • custom-v1',
+    'image config • linux/s390x'
+  ]);
 });
