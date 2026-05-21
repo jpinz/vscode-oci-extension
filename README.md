@@ -12,6 +12,7 @@ Visual Studio Code extension for exploring OCI image layout folders from the OCI
 	- Pick an image from the local Docker daemon
 	- Enter a full remote registry reference (tag or digest)
 - Browse `oci-layout`, `index.json`, indexes, manifests, configs, layers, and attestations in a linked tree.
+- Attestation nodes use concise display labels such as `SLSA`, `SBOM (SPDX)`, `SBOM (CycloneDX)`, `Trivy Report`, and `VEX`.
 - Open blobs and descriptor files in the custom `OCI Blob Viewer` editor.
 - Open linked OCI files directly for raw inspection.
 - Use refresh actions on both OCI Layout and Docker Images views.
@@ -25,10 +26,10 @@ Export strategy is selected automatically:
 
 - Registry images:
 	- Prefer direct registry copy with `oras cp --recursive ... --to-oci-layout ...`
-	- Fall back to `skopeo copy --all ... oci:...`
+	- Fall back to `skopeo copy --all --format oci ... oci:...:<tag>`
 	- Fall back to `docker pull` + `docker save` + `oras cp --from-oci-layout ... --to-oci-layout ...`
 - Docker daemon images:
-	- Prefer `skopeo copy --all docker-daemon:... oci:...`
+	- Prefer `skopeo copy --all --format oci docker-daemon:... oci:...:<tag>`
 	- Fall back to `docker save` + `oras cp --from-oci-layout ... --to-oci-layout ...`
 
 Export metadata is written to `.oci-explorer.json` in each exported layout folder.

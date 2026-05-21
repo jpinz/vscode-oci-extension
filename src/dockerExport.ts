@@ -102,7 +102,17 @@ async function exportWithSkopeo(
   outputChannel.appendLine(`Exporting ${reference} with skopeo…`);
   outputChannel.show(true);
   const inputReference = source === 'registry' ? `docker://${reference}` : `docker-daemon:${reference}`;
-  await spawnWithOutput('skopeo', ['copy', '--all', inputReference, `oci:${outputDir}`]);
+  const destinationTag = getReferenceTag(reference) ?? 'latest';
+  await spawnWithOutput('skopeo', [
+    'copy',
+    '--all',
+    '--multi-arch',
+    'all',
+    '--format',
+    'oci',
+    inputReference,
+    `oci:${outputDir}:${destinationTag}`
+  ]);
   writeExportMetadata(outputDir, reference, source, 'skopeo');
   outputChannel.appendLine('skopeo export complete.');
 }
@@ -211,10 +221,15 @@ export async function exportImageToOciLayout(reference: string, options?: Export
     outputDir = path.join(os.tmpdir(), 'oci-layouts', imageDirName);
   }
 
+  outputChannel.show(true);
   if (fs.existsSync(outputDir)) {
+    outputChannel.appendLine(`OCI layout target already exists: ${outputDir}`);
+    outputChannel.appendLine(`Deleting existing directory: ${outputDir}`);
     fs.rmSync(outputDir, { recursive: true, force: true });
+    outputChannel.appendLine(`Deleted existing directory: ${outputDir}`);
   }
   fs.mkdirSync(outputDir, { recursive: true });
+  outputChannel.appendLine(`Created OCI layout directory: ${outputDir}`);
 
   if (source === 'registry') {
     const hasOras = await isCommandAvailable('oras');
