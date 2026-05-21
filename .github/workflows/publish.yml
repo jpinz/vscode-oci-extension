@@ -20,6 +20,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Set version from release tag
+        run: |
+          VERSION="${TAG_NAME#v}"
+          echo "Setting package.json version to ${VERSION}"
+          npm version "${VERSION}" --no-git-tag-version --allow-same-version
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
+
       - name: Lint
         run: npm run lint
 
