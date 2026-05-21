@@ -198,6 +198,15 @@ function isTrivyVulnerabilityPredicate(predicateType: string): boolean {
   }
 }
 
+function isVexPredicate(predicateType: string): boolean {
+  const normalized = predicateType.toLowerCase();
+  if (normalized.includes('openvex')) {
+    return true;
+  }
+
+  return /(^|[^a-z])vex([^a-z]|$)/.test(normalized);
+}
+
 function getInTotoDisplayLabel(node: LayoutNode): string | null {
   if (node.mediaType !== 'application/vnd.in-toto+json') {
     return null;
@@ -209,15 +218,17 @@ function getInTotoDisplayLabel(node: LayoutNode): string | null {
   let baseLabel = 'attestation';
 
   if (isSlsaProvenancePredicate(predicateType)) {
-    baseLabel = 'slsa provenance';
+    baseLabel = 'SLSA';
   } else if (isTrivyVulnerabilityPredicate(predicateType)) {
-    baseLabel = 'trivy report';
+    baseLabel = 'Trivy Report';
+  } else if (isVexPredicate(predicateType)) {
+    baseLabel = 'VEX';
   } else if (predicateType === 'https://microsoft.com/spdx/v3.0') {
-    baseLabel = 'msft-sbom (spdx)';
+    baseLabel = 'MSFT-SBOM (SPDX)';
   } else if (predicateType.includes('spdx')) {
-    baseLabel = 'sbom (spdx)';
+    baseLabel = 'SBOM (SPDX)';
   } else if (predicateType.includes('cyclonedx')) {
-    baseLabel = 'sbom (cyclonedx)';
+    baseLabel = 'SBOM (CycloneDX)';
   } else if (predicateType) {
     const leafSegment = predicateType.split('#').pop()?.split('/').pop() ?? '';
     baseLabel = joinLabelParts(['attestation', toSlug(leafSegment) || 'other']);
@@ -237,7 +248,7 @@ function getHumanReadableName(node: LayoutNode): string {
     if (attestationLabel) {
       const predicateType = getPredicateTypeAnnotation(node.annotations);
       const baseLabel = predicateType
-        ? joinLabelParts([attestationLabel, predicateType])
+        ? (isVexPredicate(predicateType) ? 'VEX' : joinLabelParts([attestationLabel, predicateType]))
         : attestationLabel;
       return withPlatformLabel(baseLabel, node.platform) || node.name;
     }

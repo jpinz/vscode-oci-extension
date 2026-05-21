@@ -86,10 +86,87 @@ test('parseLayout categorizes in-toto statements and docker configs for display 
 	const labels = indexNode.children.map((child) => layout.nodesByKey[child.key].label);
 
 	assert.deepEqual(labels, [
-		'slsa provenance • linux/amd64',
-		'sbom (spdx) • linux/arm64',
-		'sbom (cyclonedx)',
-		'trivy report',
+		'SLSA • linux/amd64',
+		'SBOM (SPDX) • linux/arm64',
+		'SBOM (CycloneDX)',
+		'Trivy Report',
 		'image config • linux/s390x'
 	]);
+});
+
+test('parseLayout labels OpenVEX in-toto attestations as VEX', () => {
+	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'oci-openvex-test-'));
+	try {
+		fs.mkdirSync(path.join(tempRoot, 'blobs', 'sha256'), { recursive: true });
+		fs.writeFileSync(path.join(tempRoot, 'oci-layout'), '{"imageLayoutVersion":"1.0.0"}');
+		fs.writeFileSync(path.join(tempRoot, 'index.json'), JSON.stringify({
+			schemaVersion: 2,
+			manifests: [
+				{
+					mediaType: 'application/vnd.in-toto+json',
+					digest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+					size: 123,
+					platform: { os: 'linux', architecture: 'amd64' }
+				}
+			]
+		}));
+		fs.writeFileSync(
+			path.join(tempRoot, 'blobs', 'sha256', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+			JSON.stringify({
+				_type: 'https://in-toto.io/Statement/v0.1',
+				predicateType: 'https://openvex.dev/ns/v0.2.0'
+			})
+		);
+
+		const layout = parseLayout(tempRoot);
+		const indexNode = layout.nodesByKey['index-file'];
+		const vexNode = layout.nodesByKey[indexNode.children[0].key];
+
+		assert.equal(vexNode.label, 'VEX • linux/amd64');
+	} finally {
+		fs.rmSync(tempRoot, { recursive: true, force: true });
+	}
+});
+
+test('parseLayout labels VEX-like attestation manifests as VEX', () => {
+	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'oci-vex-manifest-test-'));
+	try {
+		fs.mkdirSync(path.join(tempRoot, 'blobs', 'sha256'), { recursive: true });
+		fs.writeFileSync(path.join(tempRoot, 'oci-layout'), '{"imageLayoutVersion":"1.0.0"}');
+		fs.writeFileSync(path.join(tempRoot, 'index.json'), JSON.stringify({
+			schemaVersion: 2,
+			manifests: [
+				{
+					mediaType: 'application/vnd.oci.image.manifest.v1+json',
+					digest: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+					size: 321,
+					annotations: {
+						'vnd.docker.reference.type': 'attestation-manifest',
+						'in-toto.io/predicate-type': 'https://example.org/security/vex/v1'
+					},
+					platform: { os: 'linux', architecture: 'arm64' }
+				}
+			]
+		}));
+		fs.writeFileSync(
+			path.join(tempRoot, 'blobs', 'sha256', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
+			JSON.stringify({
+				schemaVersion: 2,
+				config: {
+					mediaType: 'application/vnd.oci.image.config.v1+json',
+					digest: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+					size: 1
+				},
+				layers: []
+			})
+		);
+
+		const layout = parseLayout(tempRoot);
+		const indexNode = layout.nodesByKey['index-file'];
+		const vexNode = layout.nodesByKey[indexNode.children[0].key];
+
+		assert.equal(vexNode.label, 'VEX • linux/arm64');
+	} finally {
+		fs.rmSync(tempRoot, { recursive: true, force: true });
+	}
 });

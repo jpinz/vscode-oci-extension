@@ -2,6 +2,12 @@
 
 All notable changes to the "oci-layout-explorer" extension will be documented in this file.
 
+## [1.0.2] - 2026-05-21
+
+- Fixed `skopeo` export to write tagged OCI layout destinations with explicit `--format oci`, preserving manifest-level attestation content during export.
+- Updated attestation display labels to the new title-cased naming (`SLSA`, `SBOM (SPDX)`, `SBOM (CycloneDX)`, `Trivy Report`, `VEX`).
+- Updated documentation and tests to match the current export behavior and label wording.
+
 ## [1.0.1] - 2026-05-21
 
 - Added `Explore Image` flow in the OCI Explorer view to open a local OCI folder, select a Docker daemon image, or provide a full remote image reference.
