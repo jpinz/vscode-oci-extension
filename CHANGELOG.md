@@ -2,6 +2,12 @@
 
 All notable changes to the "oci-layout-explorer" extension will be documented in this file.
 
+## [1.0.7] - 2026-05-21
+
+- Removed the custom blob web UI/editor path and standardized OCI file viewing in the native VS Code text editor.
+- Added Ctrl/Cmd-click digest navigation in OCI descriptor documents to jump directly to matching blobs under `blobs/<algorithm>/<digest>` while keeping standard JSON editor features.
+- Added digest hover previews in OCI descriptor documents, including blob path, size, and parsed descriptor hints when available.
+
 ## [1.0.6] - 2026-05-21
 
 - Added automatic JSON language detection for OCI descriptor files opened as text, plus a configurable size limit via `ociExplorer.jsonDetectionMaxBytes` (default `8388608`, or 8 MB).

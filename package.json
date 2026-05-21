@@ -22,7 +22,6 @@
     "explorer"
   ],
   "activationEvents": [
-    "onCustomEditor:ociExplorer.blobViewer",
     "onView:ociExplorer.dockerImages"
   ],
   "main": "./dist/extension.js",
@@ -91,24 +90,6 @@
         }
       ]
     },
-    "customEditors": [
-      {
-        "viewType": "ociExplorer.blobViewer",
-        "displayName": "OCI Blob Viewer",
-        "priority": "option",
-        "selector": [
-          {
-            "filenamePattern": "**/blobs/**/*"
-          },
-          {
-            "filenamePattern": "**/index.json"
-          },
-          {
-            "filenamePattern": "**/oci-layout"
-          }
-        ]
-      }
-    ],
     "menus": {
       "explorer/context": [
         {

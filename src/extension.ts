@@ -1,16 +1,17 @@
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { CONTEXT_UPDATE_DEBOUNCE_MS } from './constants';
-import { OciBlobEditorProvider } from './customEditor';
 import { exportImageToOciLayout } from './dockerExport';
 import { listImages } from './docker';
 import { DockerImageNode, DockerImageTreeProvider } from './dockerTree';
 import { LayoutNode, parseLayout } from './ociLayout';
-import { openNodeFile } from './nodePreview';
+import { openNodeFile, openNodePreview } from './nodePreview';
 import { OciTreeProvider } from './tree';
 
 const DEFAULT_JSON_DETECTION_MAX_BYTES = 8 * 1024 * 1024;
 const JSON_DETECTION_MAX_BYTES_SETTING = 'jsonDetectionMaxBytes';
+const OCI_DIGEST_PATTERN = /\b([A-Za-z][A-Za-z0-9+._-]*):([a-f0-9]{32,})\b/g;
 
 function getJsonDetectionMaxBytes(): number {
   const configured = vscode.workspace
@@ -75,6 +76,203 @@ async function ensureJsonLanguageForOciDocument(document: vscode.TextDocument): 
   }
 
   await vscode.languages.setTextDocumentLanguage(document, 'json');
+}
+
+function findLayoutRoot(filePath: string): string | null {
+  let dir = path.dirname(filePath);
+  for (let i = 0; i < 10; i++) {
+    const layoutPath = path.join(dir, 'oci-layout');
+    const indexPath = path.join(dir, 'index.json');
+    const blobsPath = path.join(dir, 'blobs');
+    if (fs.existsSync(layoutPath) && fs.existsSync(indexPath) && fs.existsSync(blobsPath)) {
+      return dir;
+    }
+
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      break;
+    }
+    dir = parent;
+  }
+
+  return null;
+}
+
+function digestToBlobPath(rootPath: string, digest: string): string | null {
+  const [algorithm, encoded] = digest.split(':', 2);
+  if (!algorithm || !encoded) {
+    return null;
+  }
+
+  return path.join(rootPath, 'blobs', algorithm, encoded);
+}
+
+function createOciDescriptorDocumentLinks(document: vscode.TextDocument): vscode.DocumentLink[] {
+  const layoutRoot = findLayoutRoot(document.uri.fsPath);
+  if (!layoutRoot) {
+    return [];
+  }
+
+  const text = document.getText();
+  const links: vscode.DocumentLink[] = [];
+  const pattern = new RegExp(OCI_DIGEST_PATTERN);
+  let match = pattern.exec(text);
+
+  while (match) {
+    const digest = `${match[1]}:${match[2]}`;
+    const blobPath = digestToBlobPath(layoutRoot, digest);
+
+    if (blobPath && fs.existsSync(blobPath) && fs.statSync(blobPath).isFile()) {
+      const start = document.positionAt(match.index);
+      const end = document.positionAt(match.index + digest.length);
+      const link = new vscode.DocumentLink(new vscode.Range(start, end), vscode.Uri.file(blobPath));
+      link.tooltip = `Open ${digest}`;
+      links.push(link);
+    }
+
+    match = pattern.exec(text);
+  }
+
+  return links;
+}
+
+function findDigestAtPosition(document: vscode.TextDocument, position: vscode.Position): {
+  digest: string;
+  range: vscode.Range;
+} | null {
+  const lineText = document.lineAt(position.line).text;
+  const pattern = new RegExp(OCI_DIGEST_PATTERN);
+  let match = pattern.exec(lineText);
+
+  while (match) {
+    const digest = `${match[1]}:${match[2]}`;
+    const startChar = match.index;
+    const endChar = startChar + digest.length;
+    if (position.character >= startChar && position.character <= endChar) {
+      return {
+        digest,
+        range: new vscode.Range(position.line, startChar, position.line, endChar)
+      };
+    }
+
+    match = pattern.exec(lineText);
+  }
+
+  return null;
+}
+
+function readDescriptorSummary(blobPath: string, maxBytes: number): {
+  mediaType?: string;
+  artifactType?: string;
+  predicateType?: string;
+  kind?: string;
+  manifests?: number;
+  layers?: number;
+} | null {
+  try {
+    const stat = fs.statSync(blobPath);
+    if (!stat.isFile() || stat.size > maxBytes) {
+      return null;
+    }
+
+    const content = fs.readFileSync(blobPath, 'utf8');
+    if (!isJsonDocumentContent(content)) {
+      return null;
+    }
+
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    const summary: {
+      mediaType?: string;
+      artifactType?: string;
+      predicateType?: string;
+      kind?: string;
+      manifests?: number;
+      layers?: number;
+    } = {};
+
+    if (typeof parsed.mediaType === 'string') {
+      summary.mediaType = parsed.mediaType;
+    }
+    if (typeof parsed.artifactType === 'string') {
+      summary.artifactType = parsed.artifactType;
+    }
+    if (summary.mediaType === 'application/vnd.in-toto+json' && typeof parsed.predicateType === 'string') {
+      summary.predicateType = parsed.predicateType;
+    }
+
+    if (Array.isArray(parsed.manifests)) {
+      summary.kind = 'image index';
+      summary.manifests = parsed.manifests.length;
+    } else if (Array.isArray(parsed.layers) || (parsed.config && typeof parsed.config === 'object')) {
+      summary.kind = 'image manifest';
+      if (Array.isArray(parsed.layers)) {
+        summary.layers = parsed.layers.length;
+      }
+    } else if (typeof parsed.rootfs === 'object' && parsed.rootfs !== null) {
+      summary.kind = 'image config';
+    }
+
+    return summary;
+  } catch {
+    return null;
+  }
+}
+
+function provideOciDigestHover(document: vscode.TextDocument, position: vscode.Position): vscode.Hover | null {
+  if (!isLikelyOciDescriptorPath(document.uri.fsPath)) {
+    return null;
+  }
+
+  const match = findDigestAtPosition(document, position);
+  if (!match) {
+    return null;
+  }
+
+  const layoutRoot = findLayoutRoot(document.uri.fsPath);
+  if (!layoutRoot) {
+    return null;
+  }
+
+  const blobPath = digestToBlobPath(layoutRoot, match.digest);
+  if (!blobPath || !fs.existsSync(blobPath)) {
+    return null;
+  }
+
+  const stat = fs.statSync(blobPath);
+  if (!stat.isFile()) {
+    return null;
+  }
+
+  const markdown = new vscode.MarkdownString(undefined, true);
+  markdown.appendMarkdown('**OCI Blob Preview**\n\n');
+  markdown.appendCodeblock(match.digest, 'text');
+  markdown.appendMarkdown(`\nPath: ${blobPath.replace(/\\/g, '/')}  \n`);
+  markdown.appendMarkdown(`Size: ${stat.size.toLocaleString()} bytes\n`);
+
+  const summary = readDescriptorSummary(blobPath, getJsonDetectionMaxBytes());
+  if (summary) {
+    if (summary.kind) {
+      markdown.appendMarkdown(`\nKind: ${summary.kind}  \n`);
+    }
+    if (summary.mediaType) {
+      markdown.appendMarkdown(`Media Type: \`${summary.mediaType}\`  \n`);
+    }
+    if (summary.artifactType) {
+      markdown.appendMarkdown(`Artifact Type: \`${summary.artifactType}\`  \n`);
+    }
+    if (summary.predicateType) {
+      markdown.appendMarkdown(`Predicate Type: \`${summary.predicateType}\`  \n`);
+    }
+    if (typeof summary.manifests === 'number') {
+      markdown.appendMarkdown(`Manifests: ${summary.manifests}  \n`);
+    }
+    if (typeof summary.layers === 'number') {
+      markdown.appendMarkdown(`Layers: ${summary.layers}  \n`);
+    }
+  }
+
+  markdown.appendMarkdown('\nCtrl/Cmd-click to open this blob.');
+  return new vscode.Hover(markdown, match.range);
 }
 
 async function promptForLayoutFolder(): Promise<string | null> {
@@ -157,18 +355,9 @@ export function activate(context: vscode.ExtensionContext): void {
   void vscode.commands.executeCommand('setContext', 'ociExplorer.containerToolsActive', containerToolsActive);
 
   const treeProvider = new OciTreeProvider();
-  const editorProvider = new OciBlobEditorProvider();
   let contextUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 
   void Promise.all(vscode.workspace.textDocuments.map((document) => ensureJsonLanguageForOciDocument(document)));
-
-  context.subscriptions.push(
-    vscode.window.registerCustomEditorProvider(
-      OciBlobEditorProvider.viewType,
-      editorProvider,
-      { supportsMultipleEditorsPerDocument: false }
-    )
-  );
 
   const uriHasType = async (uri: vscode.Uri, type: vscode.FileType): Promise<boolean> => {
     try {
@@ -231,7 +420,6 @@ export function activate(context: vscode.ExtensionContext): void {
         async () => parseLayout(rootPath)
       );
       treeProvider.setLayout(layout);
-      editorProvider.refreshAll(layout);
       await context.workspaceState.update('ociExplorer.rootPath', rootPath);
     } catch (error) {
       treeProvider.setLayout(null);
@@ -244,16 +432,6 @@ export function activate(context: vscode.ExtensionContext): void {
   if (initialPath) {
     void refreshFromPath(initialPath);
   }
-
-  editorProvider.onFocusNode((nodeKey: string) => {
-    const treeNode = treeProvider.findNode(nodeKey);
-    if (treeNode) {
-      void treeView.reveal(treeNode, { select: true, expand: true });
-    }
-    if (treeNode && treeNode.filePath) {
-      void vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(treeNode.filePath));
-    }
-  });
 
   scheduleLayoutFolderContextUpdate();
 
@@ -276,6 +454,24 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     treeView,
     ...contextWatchers,
+    vscode.languages.registerDocumentLinkProvider(
+      { scheme: 'file' },
+      {
+        provideDocumentLinks: (document) => {
+          if (!isLikelyOciDescriptorPath(document.uri.fsPath)) {
+            return [];
+          }
+
+          return createOciDescriptorDocumentLinks(document);
+        }
+      }
+    ),
+    vscode.languages.registerHoverProvider(
+      { scheme: 'file' },
+      {
+        provideHover: (document, position) => provideOciDigestHover(document, position)
+      }
+    ),
     vscode.workspace.onDidOpenTextDocument((document) => {
       void ensureJsonLanguageForOciDocument(document);
     }),
@@ -343,27 +539,10 @@ export function activate(context: vscode.ExtensionContext): void {
         await openNodeFile(node);
       }
     }),
-    vscode.commands.registerCommand('ociExplorer.focusNode', async (nodeKey: string) => {
-      if (!treeProvider.layout) {
-        return;
-      }
-      const node = treeProvider.layout.nodesByKey[nodeKey];
-      if (node && node.filePath) {
-        await vscode.commands.executeCommand(
-          'vscode.openWith',
-          vscode.Uri.file(node.filePath),
-          OciBlobEditorProvider.viewType
-        );
-      }
-    }),
     treeView.onDidChangeSelection(async (event) => {
       const [node] = event.selection;
       if (node && 'filePath' in node && node.filePath) {
-        await vscode.commands.executeCommand(
-          'vscode.openWith',
-          vscode.Uri.file(node.filePath),
-          OciBlobEditorProvider.viewType
-        );
+        await openNodePreview(node);
       }
     })
   );

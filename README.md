@@ -3,7 +3,7 @@
 [![CI](https://github.com/jpinz/vscode-oci-extension/actions/workflows/ci.yml/badge.svg)](https://github.com/jpinz/vscode-oci-extension/actions/workflows/ci.yml)
 [![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/jpinz.oci-layout-explorer?label=VS%20Code%20Marketplace)](https://marketplace.visualstudio.com/items?itemName=jpinz.oci-layout-explorer)
 
-Visual Studio Code extension for exploring OCI image layout folders from the OCI Explorer view and a custom blob editor.
+Visual Studio Code extension for exploring OCI image layout folders from the OCI Explorer view.
 
 ## Features
 
@@ -13,8 +13,9 @@ Visual Studio Code extension for exploring OCI image layout folders from the OCI
 	- Enter a remote registry reference (tag or digest)
 - Browse `oci-layout`, `index.json`, indexes, manifests, configs, layers, and attestations in a linked tree.
 - Attestation nodes use concise display labels such as `SLSA`, `SBOM (SPDX)`, `SBOM (CycloneDX)`, `Trivy Report`, and `VEX`.
-- Open blobs and descriptor files in the custom `OCI Blob Viewer` editor.
+- Open blobs and descriptor files directly in the VS Code text editor.
 - Open linked OCI files directly for raw inspection.
+- OCI descriptor files opened as text are detected as JSON (when parseable), support Ctrl/Cmd-click digest navigation to linked blobs, and show digest hover previews.
 - Use refresh actions on both OCI Layout and Docker Images views.
 - Integrates with the [Container Tools](https://marketplace.visualstudio.com/items?itemName=ms-vscode.container-tools) extension when available.
 

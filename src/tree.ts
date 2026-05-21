@@ -30,9 +30,9 @@ class LayoutTreeItem extends vscode.TreeItem {
 
     if (node.filePath) {
       this.command = {
-        command: 'ociExplorer.focusNode',
-        title: 'Focus OCI Node',
-        arguments: [node.key]
+        command: 'ociExplorer.openRawFile',
+        title: 'Open OCI File',
+        arguments: [node]
       };
     }
   }
