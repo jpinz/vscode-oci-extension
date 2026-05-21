@@ -26,24 +26,21 @@ Export strategy is selected automatically:
 
 - Registry images:
 	- Prefer direct registry copy with `oras cp --recursive ... --to-oci-layout ...`
-	- Fall back to `skopeo copy --all --format oci ... oci:...:<tag>`
 	- Fall back to `docker pull` + `docker save` + `oras cp --from-oci-layout ... --to-oci-layout ...`
 - Docker daemon images:
-	- Prefer `skopeo copy --all --format oci docker-daemon:... oci:...:<tag>`
-	- Fall back to `docker save` + `oras cp --from-oci-layout ... --to-oci-layout ...`
+	- Use `docker save` + `oras cp --from-oci-layout <archive>:latest --to-oci-layout <layout>:latest`
 
 Export metadata is written to `.oci-explorer.json` in each exported layout folder.
 
 ## Requirements
 
 - VS Code `^1.120.0`
-- For full image exploration/export functionality, install [Skopeo](https://github.com/containers/skopeo) and/or [ORAS](https://oras.land/).
+- For image export functionality, install [ORAS](https://oras.land/).
 - For local daemon exploration:
 	- Docker daemon access (`docker` CLI)
 - For remote registry exploration:
-	- `oras` recommended (used for direct registry-to-layout copy)
-	- `skopeo` optional fallback
-	- `docker` optional last-resort fallback path
+	- `oras` (used for direct registry-to-layout copy)
+	- `docker` optional fallback path via `docker pull` + `docker save`
 
 ## Getting Started
 

@@ -2,6 +2,19 @@
 
 All notable changes to the "oci-layout-explorer" extension will be documented in this file.
 
+## [1.0.4] - 2026-05-21
+
+- Removed `skopeo` from the export pipeline to eliminate tool-specific copy failures and flag compatibility issues.
+- Standardized daemon exports on `docker save` + `oras cp --from-oci-layout ...:latest --to-oci-layout ...:latest`.
+- Kept direct registry export via `oras cp --recursive` with fallback to `docker pull` + `docker save` + `oras` conversion.
+- Updated documentation to reflect ORAS-first requirements and export behavior.
+
+## [1.0.3] - 2026-05-21
+
+- Fixed `skopeo` invocation to avoid incompatible flag combinations during OCI layout export.
+- Improved daemon-export handling for referrer preservation scenarios before the ORAS-only pipeline update.
+- Refined export fallback behavior and related output messaging.
+
 ## [1.0.2] - 2026-05-21
 
 - Fixed `skopeo` export to write tagged OCI layout destinations with explicit `--format oci`, preserving manifest-level attestation content during export.

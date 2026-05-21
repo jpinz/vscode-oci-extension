@@ -12,7 +12,7 @@ interface ExportMetadata {
   reference: string;
   exportedAt: string;
   source: 'docker-daemon' | 'registry';
-  tool: 'skopeo' | 'docker-save' | 'oras';
+  tool: 'docker-save' | 'oras';
 }
 
 interface ExportImageOptions {
@@ -94,27 +94,6 @@ async function isCommandAvailable(command: string): Promise<boolean> {
   }
 }
 
-async function exportWithSkopeo(
-  reference: string,
-  outputDir: string,
-  source: ExportMetadata['source']
-): Promise<void> {
-  outputChannel.appendLine(`Exporting ${reference} with skopeo…`);
-  outputChannel.show(true);
-  const inputReference = source === 'registry' ? `docker://${reference}` : `docker-daemon:${reference}`;
-  const destinationTag = getReferenceTag(reference) ?? 'latest';
-  await spawnWithOutput('skopeo', [
-    'copy',
-    '--all',
-    '--format',
-    'oci',
-    inputReference,
-    `oci:${outputDir}:${destinationTag}`
-  ]);
-  writeExportMetadata(outputDir, reference, source, 'skopeo');
-  outputChannel.appendLine('skopeo export complete.');
-}
-
 function getReferenceTag(reference: string): string | null {
   const lastSlash = reference.lastIndexOf('/');
   const lastColon = reference.lastIndexOf(':');
@@ -131,36 +110,18 @@ function asTaggedLayoutRef(layoutPath: string, tag: string): string {
 
 async function convertArchiveToOciLayout(
   archivePath: string,
-  outputDir: string,
-  reference: string
+  outputDir: string
 ): Promise<void> {
   outputChannel.appendLine('Converting archive to OCI layout with oras…');
   outputChannel.show(true);
 
-  const requestedTag = getReferenceTag(reference);
-  const destinationTag = requestedTag ?? 'latest';
-  const candidateTags = Array.from(new Set([requestedTag, 'latest'].filter((tag): tag is string => Boolean(tag))));
-
-  let lastError: unknown;
-  for (const sourceTag of candidateTags) {
-    try {
-      await spawnWithOutput('oras', [
-        'cp',
-        '--from-oci-layout',
-        asTaggedLayoutRef(archivePath, sourceTag),
-        '--to-oci-layout',
-        asTaggedLayoutRef(outputDir, destinationTag)
-      ]);
-      return;
-    } catch (error) {
-      lastError = error;
-      outputChannel.appendLine(`oras copy failed for source tag ${sourceTag}; trying next option...`);
-    }
-  }
-
-  throw lastError instanceof Error
-    ? lastError
-    : new Error('Failed to convert archive with oras using available tag candidates.');
+  await spawnWithOutput('oras', [
+    'cp',
+    '--from-oci-layout',
+    asTaggedLayoutRef(archivePath, 'latest'),
+    '--to-oci-layout',
+    asTaggedLayoutRef(outputDir, 'latest')
+  ]);
 }
 
 async function exportWithDockerSave(
@@ -176,7 +137,7 @@ async function exportWithDockerSave(
     outputChannel.appendLine(`Saving ${reference} with docker save…`);
     outputChannel.show(true);
     await spawnWithOutput('docker', ['save', reference, '-o', tarPath]);
-    await convertArchiveToOciLayout(tarPath, outputDir, reference);
+    await convertArchiveToOciLayout(tarPath, outputDir);
     writeExportMetadata(outputDir, reference, source, 'oras');
     outputChannel.appendLine('Conversion complete.');
   } finally {
@@ -230,30 +191,24 @@ export async function exportImageToOciLayout(reference: string, options?: Export
   outputChannel.appendLine(`Created OCI layout directory: ${outputDir}`);
 
   if (source === 'registry') {
-    const hasOras = await isCommandAvailable('oras');
-    if (hasOras) {
-      try {
-        await exportRegistryDirect(reference, outputDir);
-        return outputDir;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        outputChannel.appendLine(`Direct registry copy failed: ${message}`);
-        outputChannel.appendLine('Falling back to skopeo/docker-based export path.');
-      }
+    if (!(await isCommandAvailable('oras'))) {
+      throw new Error('oras is required for OCI layout export.');
     }
-  }
-
-  const hasSkopeo = await isCommandAvailable('skopeo');
-  if (hasSkopeo) {
-    await exportWithSkopeo(reference, outputDir, source);
-    return outputDir;
+    try {
+      await exportRegistryDirect(reference, outputDir);
+      return outputDir;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      outputChannel.appendLine(`Direct registry copy failed: ${message}`);
+      outputChannel.appendLine('Falling back to docker save + oras conversion path.');
+    }
   }
 
   if (source === 'registry') {
     await pullImage(reference);
   }
   if (!(await isCommandAvailable('oras'))) {
-    throw new Error('oras is required for docker-save conversion when skopeo is unavailable.');
+    throw new Error('oras is required for OCI layout export.');
   }
   await exportWithDockerSave(reference, outputDir, source);
 
