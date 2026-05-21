@@ -80,6 +80,8 @@ export function activate(context: vscode.ExtensionContext): void {
     }, CONTEXT_UPDATE_DEBOUNCE_MS);
   };
 
+  const layoutViewId = containerToolsActive ? 'ociExplorer.layout.integrated' : 'ociExplorer.layout';
+
   const refreshFromPath = async (rootPath: string | undefined): Promise<void> => {
     if (!rootPath) {
       treeProvider.setLayout(null);
@@ -120,7 +122,6 @@ export function activate(context: vscode.ExtensionContext): void {
 
   scheduleLayoutFolderContextUpdate();
 
-  const layoutViewId = containerToolsActive ? 'ociExplorer.layout.integrated' : 'ociExplorer.layout';
   const treeView = vscode.window.createTreeView(layoutViewId, {
     treeDataProvider: treeProvider,
     showCollapseAll: true
