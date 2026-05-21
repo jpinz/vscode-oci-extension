@@ -62,6 +62,9 @@ Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/item
 - `ociExplorer.docker.exportPath`
 	- Directory where OCI layouts are exported.
 	- If empty, a temporary directory is used.
+- `ociExplorer.jsonDetectionMaxBytes`
+	- Maximum file size (bytes) for automatic JSON language detection on OCI descriptor files.
+	- Default is `8388608` (8 MB).
 
 ## Development
 

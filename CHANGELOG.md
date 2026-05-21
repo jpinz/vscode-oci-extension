@@ -2,6 +2,10 @@
 
 All notable changes to the "oci-layout-explorer" extension will be documented in this file.
 
+## [1.0.6] - 2026-05-21
+
+- Added automatic JSON language detection for OCI descriptor files opened as text, plus a configurable size limit via `ociExplorer.jsonDetectionMaxBytes` (default `8388608`, or 8 MB).
+
 ## [1.0.5] - 2026-05-21
 
 - Switched remote registry export to always use direct `oras cp --recursive ... --to-oci-layout ...`, removing the Docker pull/save fallback for registry mode.

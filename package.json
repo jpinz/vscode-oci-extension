@@ -169,6 +169,12 @@
           "type": "string",
           "default": "",
           "description": "Directory for exported OCI layouts. Leave empty to use a temporary directory."
+        },
+        "ociExplorer.jsonDetectionMaxBytes": {
+          "type": "number",
+          "default": 8388608,
+          "minimum": 1,
+          "description": "Maximum file size in bytes for automatic OCI JSON detection when opening descriptor files. Files larger than this remain in their default language mode."
         }
       }
     }

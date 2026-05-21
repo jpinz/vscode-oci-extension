@@ -9,6 +9,74 @@ import { LayoutNode, parseLayout } from './ociLayout';
 import { openNodeFile } from './nodePreview';
 import { OciTreeProvider } from './tree';
 
+const DEFAULT_JSON_DETECTION_MAX_BYTES = 8 * 1024 * 1024;
+const JSON_DETECTION_MAX_BYTES_SETTING = 'jsonDetectionMaxBytes';
+
+function getJsonDetectionMaxBytes(): number {
+  const configured = vscode.workspace
+    .getConfiguration('ociExplorer')
+    .get<number>(JSON_DETECTION_MAX_BYTES_SETTING, DEFAULT_JSON_DETECTION_MAX_BYTES);
+
+  if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+    return DEFAULT_JSON_DETECTION_MAX_BYTES;
+  }
+
+  return Math.floor(configured);
+}
+
+function isLikelyOciDescriptorPath(fsPath: string): boolean {
+  const normalized = fsPath.replace(/\\/g, '/');
+  if (normalized.endsWith('/index.json') || normalized.endsWith('/oci-layout')) {
+    return true;
+  }
+
+  return /\/blobs\/[^/]+\/[^/]+$/.test(normalized);
+}
+
+function isJsonDocumentContent(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  const firstChar = trimmed[0];
+  if (firstChar !== '{' && firstChar !== '[') {
+    return false;
+  }
+
+  try {
+    JSON.parse(trimmed);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function ensureJsonLanguageForOciDocument(document: vscode.TextDocument): Promise<void> {
+  if (document.uri.scheme !== 'file') {
+    return;
+  }
+
+  if (document.languageId === 'json' || !isLikelyOciDescriptorPath(document.uri.fsPath)) {
+    return;
+  }
+
+  try {
+    const stat = await vscode.workspace.fs.stat(document.uri);
+    if (stat.size > getJsonDetectionMaxBytes()) {
+      return;
+    }
+  } catch {
+    return;
+  }
+
+  if (!isJsonDocumentContent(document.getText())) {
+    return;
+  }
+
+  await vscode.languages.setTextDocumentLanguage(document, 'json');
+}
+
 async function promptForLayoutFolder(): Promise<string | null> {
   const selected = await vscode.window.showOpenDialog({
     canSelectFiles: false,
@@ -91,6 +159,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const treeProvider = new OciTreeProvider();
   const editorProvider = new OciBlobEditorProvider();
   let contextUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+
+  void Promise.all(vscode.workspace.textDocuments.map((document) => ensureJsonLanguageForOciDocument(document)));
 
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(
@@ -206,6 +276,9 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     treeView,
     ...contextWatchers,
+    vscode.workspace.onDidOpenTextDocument((document) => {
+      void ensureJsonLanguageForOciDocument(document);
+    }),
     { dispose: () => contextUpdateTimer && clearTimeout(contextUpdateTimer) },
     vscode.workspace.onDidChangeWorkspaceFolders(scheduleLayoutFolderContextUpdate),
     vscode.commands.registerCommand('ociExplorer.openLayout', async (resource?: vscode.Uri) => {
