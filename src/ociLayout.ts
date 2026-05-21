@@ -131,11 +131,15 @@ function getPlatformLabel(source: unknown): string | null {
   }
 
   const sourceRecord = source as Record<string, string | undefined>;
-  if (sourceRecord.os && sourceRecord.architecture) {
-    return `${sourceRecord.os}/${sourceRecord.architecture}${sourceRecord.variant ? `/${sourceRecord.variant}` : ''}`;
+  const os = sourceRecord.os && sourceRecord.os !== 'unknown' ? sourceRecord.os : undefined;
+  const arch = sourceRecord.architecture && sourceRecord.architecture !== 'unknown' ? sourceRecord.architecture : undefined;
+  const variant = sourceRecord.variant && sourceRecord.variant !== 'unknown' ? sourceRecord.variant : undefined;
+
+  if (os && arch) {
+    return `${os}/${arch}${variant ? `/${variant}` : ''}`;
   }
 
-  return sourceRecord.os || sourceRecord.architecture || null;
+  return os || arch || null;
 }
 
 function getAttestationLabel(annotations: Record<string, string> | null | undefined): string | null {
@@ -198,7 +202,9 @@ function getInTotoDisplayLabel(node: LayoutNode): string | null {
   if (isSlsaProvenancePredicate(predicateType)) {
     baseLabel = 'slsa provenance';
   } else if (isTrivyVulnerabilityPredicate(predicateType)) {
-    baseLabel = 'Trivy Vulnerability Report';
+    baseLabel = 'trivy report';
+  } else if (predicateType === 'https://microsoft.com/spdx/v3.0') {
+    baseLabel = 'msft-sbom (spdx)';
   } else if (predicateType.includes('spdx')) {
     baseLabel = 'sbom (spdx)';
   } else if (predicateType.includes('cyclonedx')) {
@@ -400,6 +406,29 @@ export function parseLayout(rootPath: string): ParsedLayout {
     const childKey = createDescriptorNode(rootPath, descriptor, 'manifest', nodesByKey, traversalStack);
     indexNode.children.push({ relation: 'manifest', key: childKey });
   });
+
+  const collectDescendantKeys = (key: string, visited: Set<string>): void => {
+    const node = nodesByKey.get(key);
+    if (!node || visited.has(key)) {
+      return;
+    }
+    visited.add(key);
+    for (const child of node.children) {
+      collectDescendantKeys(child.key, visited);
+    }
+  };
+
+  const nestedKeys = new Set<string>();
+  for (const child of indexNode.children) {
+    const descendants = new Set<string>();
+    collectDescendantKeys(child.key, descendants);
+    descendants.delete(child.key);
+    for (const key of descendants) {
+      nestedKeys.add(key);
+    }
+  }
+
+  indexNode.children = indexNode.children.filter((child) => !nestedKeys.has(child.key));
 
   const nodes = Array.from(nodesByKey.values()).map((node) => {
     const enrichedNode = {

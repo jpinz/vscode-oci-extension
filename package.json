@@ -16,7 +16,9 @@
     "image",
     "explorer"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onCustomEditor:ociExplorer.blobViewer"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -42,43 +44,28 @@
         {
           "id": "ociExplorer.layout",
           "name": "OCI Layout Explorer",
-          "icon": "media/oci-layout.svg",
-          "when": "config.ociExplorer.navigationMode != 'ui'"
+          "icon": "media/oci-layout.svg"
         }
       ]
     },
     "customEditors": [
       {
-        "viewType": "ociExplorer.layoutEditor",
-        "displayName": "OCI Layout Editor",
-        "priority": "default",
+        "viewType": "ociExplorer.blobViewer",
+        "displayName": "OCI Blob Viewer",
+        "priority": "option",
         "selector": [
+          {
+            "filenamePattern": "**/blobs/**/*"
+          },
+          {
+            "filenamePattern": "**/index.json"
+          },
           {
             "filenamePattern": "**/oci-layout"
           }
         ]
       }
     ],
-    "configuration": {
-      "title": "OCI Layout Explorer",
-      "properties": {
-        "ociExplorer.navigationMode": {
-          "type": "string",
-          "default": "both",
-          "enum": [
-            "tree",
-            "ui",
-            "both"
-          ],
-          "enumDescriptions": [
-            "Use only the VS Code tree view for OCI layout navigation.",
-            "Use only the OCI custom editor UI for navigation.",
-            "Enable both the VS Code tree view and OCI custom editor UI."
-          ],
-          "description": "Choose whether OCI layout navigation uses the tree view, the custom editor UI, or both."
-        }
-      }
-    },
     "menus": {
       "explorer/context": [
         {
@@ -111,13 +98,13 @@
     "test:vscode": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.120.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
-    "typescript-eslint": "^8.56.1",
+    "@types/vscode": "^1.120.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
     "eslint": "^9.39.3",
     "typescript": "^5.9.3",
-    "@vscode/test-cli": "^0.0.12",
-    "@vscode/test-electron": "^2.5.2"
+    "typescript-eslint": "^8.56.1"
   }
 }

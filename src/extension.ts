@@ -1,8 +1,7 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { CONTEXT_UPDATE_DEBOUNCE_MS, NAVIGATION_MODE_SETTING } from './constants';
-import { OciPanelController } from './customEditor';
-import { getNavigationPreferences } from './navigation';
+import { CONTEXT_UPDATE_DEBOUNCE_MS } from './constants';
+import { OciBlobEditorProvider } from './customEditor';
 import { LayoutNode, parseLayout } from './ociLayout';
 import { openNodeFile } from './nodePreview';
 import { OciTreeProvider } from './tree';
@@ -19,18 +18,17 @@ async function promptForLayoutFolder(): Promise<string | null> {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-  const panelController = new OciPanelController();
-  panelController.register(context);
-
   const treeProvider = new OciTreeProvider();
+  const editorProvider = new OciBlobEditorProvider();
   let contextUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const applyNavigationPreferences = (): void => {
-    const { showWebview } = getNavigationPreferences();
-    if (!showWebview) {
-      panelController.hide();
-    }
-  };
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(
+      OciBlobEditorProvider.viewType,
+      editorProvider,
+      { supportsMultipleEditorsPerDocument: false }
+    )
+  );
 
   const uriHasType = async (uri: vscode.Uri, type: vscode.FileType): Promise<boolean> => {
     try {
@@ -77,7 +75,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }, CONTEXT_UPDATE_DEBOUNCE_MS);
   };
 
-  const refreshFromPath = async (rootPath: string | undefined, preferredKey?: string | null): Promise<void> => {
+  const refreshFromPath = async (rootPath: string | undefined): Promise<void> => {
     if (!rootPath) {
       treeProvider.setLayout(null);
       return;
@@ -86,12 +84,8 @@ export function activate(context: vscode.ExtensionContext): void {
     try {
       const layout = parseLayout(rootPath);
       treeProvider.setLayout(layout);
+      editorProvider.refreshAll(layout);
       await context.workspaceState.update('ociExplorer.rootPath', rootPath);
-      if (getNavigationPreferences().showWebview) {
-        panelController.show(layout, preferredKey || undefined);
-      } else {
-        panelController.setFocus(layout, preferredKey || undefined);
-      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       void vscode.window.showErrorMessage(message);
@@ -103,8 +97,17 @@ export function activate(context: vscode.ExtensionContext): void {
     void refreshFromPath(initialPath);
   }
 
+  editorProvider.onFocusNode((nodeKey: string) => {
+    const treeNode = treeProvider.findNode(nodeKey);
+    if (treeNode) {
+      void treeView.reveal(treeNode, { select: true, expand: true });
+    }
+    if (treeNode && treeNode.filePath) {
+      void vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(treeNode.filePath));
+    }
+  });
+
   scheduleLayoutFolderContextUpdate();
-  applyNavigationPreferences();
 
   const treeView = vscode.window.createTreeView('ociExplorer.layout', {
     treeDataProvider: treeProvider,
@@ -141,53 +144,35 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('ociExplorer.refresh', async () => {
       const rootPath = context.workspaceState.get<string>('ociExplorer.rootPath');
       if (rootPath) {
-        await refreshFromPath(rootPath, panelController.focusKey);
-      }
-    }),
-    vscode.commands.registerCommand('ociExplorer.focusNode', async (nodeKey: string) => {
-      if (!treeProvider.layout || !treeProvider.layout.nodesByKey[nodeKey]) {
-        return;
-      }
-      if (getNavigationPreferences().showWebview) {
-        panelController.show(treeProvider.layout, nodeKey);
-      } else {
-        panelController.setFocus(treeProvider.layout, nodeKey);
+        await refreshFromPath(rootPath);
       }
     }),
     vscode.commands.registerCommand('ociExplorer.openRawFile', async (node?: LayoutNode) => {
       if (node && node.filePath) {
         await openNodeFile(node);
+      }
+    }),
+    vscode.commands.registerCommand('ociExplorer.focusNode', async (nodeKey: string) => {
+      if (!treeProvider.layout) {
         return;
       }
-
-      const current = treeProvider.layout && panelController.focusKey
-        ? treeProvider.layout.nodesByKey[panelController.focusKey]
-        : null;
-      await openNodeFile(current);
+      const node = treeProvider.layout.nodesByKey[nodeKey];
+      if (node && node.filePath) {
+        await vscode.commands.executeCommand(
+          'vscode.openWith',
+          vscode.Uri.file(node.filePath),
+          OciBlobEditorProvider.viewType
+        );
+      }
     }),
     treeView.onDidChangeSelection(async (event) => {
       const [node] = event.selection;
-      if (node && treeProvider.layout && treeProvider.layout.nodesByKey[node.key]) {
-        if (getNavigationPreferences().showWebview) {
-          panelController.show(treeProvider.layout, node.key);
-        } else {
-          panelController.setFocus(treeProvider.layout, node.key);
-        }
-      }
-    }),
-    vscode.workspace.onDidChangeConfiguration(async (event) => {
-      if (!event.affectsConfiguration(`ociExplorer.${NAVIGATION_MODE_SETTING}`)) {
-        return;
-      }
-
-      applyNavigationPreferences();
-      const rootPath = context.workspaceState.get<string>('ociExplorer.rootPath');
-      if (!rootPath) {
-        return;
-      }
-
-      if (getNavigationPreferences().showWebview) {
-        await refreshFromPath(rootPath, panelController.focusKey);
+      if (node && 'filePath' in node && node.filePath) {
+        await vscode.commands.executeCommand(
+          'vscode.openWith',
+          vscode.Uri.file(node.filePath),
+          OciBlobEditorProvider.viewType
+        );
       }
     })
   );

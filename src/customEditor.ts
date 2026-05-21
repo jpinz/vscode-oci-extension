@@ -1,180 +1,128 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { LayoutNode, ParsedLayout, parseLayout } from './ociLayout';
-import { openNodeFile, openNodePreview } from './nodePreview';
-import { renderLayoutErrorHtml, renderWebviewHtml } from './webview';
+import { LayoutNode, ParsedLayout, parseLayout, isOciLayoutFolder } from './ociLayout';
+import { renderNodeHtml, renderErrorHtml } from './webview';
 
-interface EditorSession {
-  rootPath: string;
-  webviewPanel: vscode.WebviewPanel;
+class OciDocument implements vscode.CustomDocument {
+  readonly uri: vscode.Uri;
+  layout: ParsedLayout;
+  focusKey: string;
+
+  constructor(uri: vscode.Uri, layout: ParsedLayout, focusKey: string) {
+    this.uri = uri;
+    this.layout = layout;
+    this.focusKey = focusKey;
+  }
+
+  dispose(): void {}
 }
 
-export class OciPanelController implements vscode.CustomTextEditorProvider {
-  static readonly viewType = 'ociExplorer.layoutEditor';
+export class OciBlobEditorProvider implements vscode.CustomReadonlyEditorProvider<OciDocument> {
+  static readonly viewType = 'ociExplorer.blobViewer';
 
-  private readonly sessionsByRootPath = new Map<string, Set<EditorSession>>();
-  private readonly pendingFocusByRootPath = new Map<string, string>();
-  currentLayout: ParsedLayout | null = null;
-  focusKey: string | null = null;
+  private readonly panels = new Map<vscode.WebviewPanel, OciDocument>();
+  private onFocusNodeCallback: ((nodeKey: string) => void) | null = null;
 
-  setFocus(layout: ParsedLayout | null, focusKey?: string): LayoutNode | undefined {
-    if (!layout || !layout.nodesByKey) {
-      return undefined;
-    }
-
-    const defaultKey = Array.isArray(layout.roots)
-      ? (layout.roots[1] ?? layout.roots[0])
-      : undefined;
-    const resolvedKey = focusKey || defaultKey;
-    const focusNode = resolvedKey ? layout.nodesByKey[resolvedKey] : undefined;
-    if (!focusNode) {
-      return undefined;
-    }
-
-    this.currentLayout = layout;
-    this.focusKey = focusNode.key;
-    if (layout.rootPath) {
-      this.pendingFocusByRootPath.set(layout.rootPath, focusNode.key);
-    }
-
-    return focusNode;
+  onFocusNode(callback: (nodeKey: string) => void): void {
+    this.onFocusNodeCallback = callback;
   }
 
-  hide(): void {
-    // Custom editors are part of VS Code's editor area and user-managed.
-  }
-
-  show(layout: ParsedLayout, focusKey?: string, options: { reveal?: boolean } = {}): void {
-    const { reveal = true } = options;
-    const focusNode = this.setFocus(layout, focusKey);
-    if (!focusNode) {
-      return;
+  openCustomDocument(uri: vscode.Uri): OciDocument {
+    const layoutRoot = findLayoutRoot(uri.fsPath);
+    if (!layoutRoot) {
+      throw new Error(`Could not find an OCI layout containing '${uri.fsPath}'.`);
     }
 
-    const openPromise = vscode.commands.executeCommand(
-      'vscode.openWith',
-      vscode.Uri.file(path.join(layout.rootPath, 'oci-layout')),
-      OciPanelController.viewType,
-      {
-        preserveFocus: !reveal,
-        preview: !reveal
-      }
-    );
-
-    void Promise.resolve(openPromise).then(() => {
-      this.updateSessions(layout.rootPath, layout);
-    }).catch((error: unknown) => {
-      console.error('Failed to open OCI custom editor.', error);
-    });
+    const layout = parseLayout(layoutRoot);
+    const focusKey = findNodeKeyForFile(layout, uri.fsPath) || layout.roots[0];
+    return new OciDocument(uri, layout, focusKey);
   }
 
-  register(context: vscode.ExtensionContext): void {
-    context.subscriptions.push(vscode.window.registerCustomEditorProvider(
-      OciPanelController.viewType,
-      this,
-      {
-        webviewOptions: {
-          retainContextWhenHidden: true
-        },
-        supportsMultipleEditorsPerDocument: true
-      }
-    ));
-  }
-
-  resolveCustomTextEditor(document: vscode.TextDocument, webviewPanel: vscode.WebviewPanel): void {
-    const rootPath = path.dirname(document.uri.fsPath);
+  resolveCustomEditor(
+    document: OciDocument,
+    webviewPanel: vscode.WebviewPanel
+  ): void {
+    this.panels.set(webviewPanel, document);
     webviewPanel.webview.options = { enableScripts: true };
 
-    const session: EditorSession = { rootPath, webviewPanel };
-    if (!this.sessionsByRootPath.has(rootPath)) {
-      this.sessionsByRootPath.set(rootPath, new Set());
-    }
-    this.sessionsByRootPath.get(rootPath)?.add(session);
+    this.updateWebview(webviewPanel, document);
 
-    webviewPanel.webview.onDidReceiveMessage((message: { command?: string; key?: string }) => {
-      const layout = this.readLayout(rootPath);
-      if (!layout) {
-        return;
-      }
-
-      if (message.command === 'focusNode' && message.key && layout.nodesByKey[message.key]) {
-        this.setFocus(layout, message.key);
-        this.updateSessions(rootPath, layout);
-        return;
-      }
-
-      if (message.command === 'goHome') {
-        const homeKey = layout.roots[1] || layout.roots[0];
-        this.setFocus(layout, homeKey);
-        this.updateSessions(rootPath, layout);
-        return;
-      }
-
-      if (message.command === 'openFile' && message.key && layout.nodesByKey[message.key]) {
-        void openNodeFile(layout.nodesByKey[message.key]);
-        return;
-      }
-
-      if (message.command === 'openPreview' && message.key && layout.nodesByKey[message.key]) {
-        void openNodePreview(layout.nodesByKey[message.key]).catch((error: unknown) => {
-          console.error('Failed to open OCI raw preview.', error);
-        });
+    webviewPanel.webview.onDidReceiveMessage((message: { command: string; key?: string }) => {
+      if (message.command === 'focusNode' && message.key) {
+        const node = document.layout.nodesByKey[message.key];
+        if (node && node.filePath) {
+          void vscode.commands.executeCommand(
+            'vscode.openWith',
+            vscode.Uri.file(node.filePath),
+            OciBlobEditorProvider.viewType
+          );
+        }
+        if (this.onFocusNodeCallback && message.key) {
+          this.onFocusNodeCallback(message.key);
+        }
+      } else if (message.command === 'openRawFile') {
+        const node = document.layout.nodesByKey[document.focusKey];
+        if (node && node.filePath) {
+          void vscode.workspace.openTextDocument(vscode.Uri.file(node.filePath)).then((doc) =>
+            vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.Beside })
+          );
+        }
+      } else if (message.command === 'loadJson') {
+        const node = document.layout.nodesByKey[document.focusKey];
+        const content = node && node.json ? JSON.stringify(node.json, null, 2) : '';
+        void webviewPanel.webview.postMessage({ command: 'jsonContent', content });
       }
     });
 
     webviewPanel.onDidDispose(() => {
-      const sessions = this.sessionsByRootPath.get(rootPath);
-      if (!sessions) {
-        return;
-      }
-
-      sessions.delete(session);
-      if (sessions.size === 0) {
-        this.sessionsByRootPath.delete(rootPath);
-      }
-    });
-
-    this.updateSessions(rootPath);
-  }
-
-  private readLayout(rootPath: string): ParsedLayout | null {
-    try {
-      return parseLayout(rootPath);
-    } catch {
-      return null;
-    }
-  }
-
-  private updateSessions(rootPath: string, knownLayout?: ParsedLayout): void {
-    const sessions = this.sessionsByRootPath.get(rootPath);
-    if (!sessions || sessions.size === 0) {
-      return;
-    }
-
-    const layout = knownLayout || this.readLayout(rootPath);
-    if (!layout) {
-      for (const session of sessions) {
-        session.webviewPanel.webview.html = renderLayoutErrorHtml(rootPath, session.webviewPanel.webview.cspSource);
-      }
-      return;
-    }
-
-    const preferredKey = this.pendingFocusByRootPath.get(rootPath) || this.focusKey || undefined;
-    const focusNode = layout.nodesByKey[preferredKey || ''] || layout.nodesByKey[layout.roots[1]] || layout.nodesByKey[layout.roots[0]];
-    if (!focusNode) {
-      return;
-    }
-
-    this.currentLayout = layout;
-    this.focusKey = focusNode.key;
-    this.pendingFocusByRootPath.set(rootPath, focusNode.key);
-
-    for (const session of sessions) {
-      session.webviewPanel.webview.html = renderWebviewHtml(layout, focusNode.key, session.webviewPanel.webview.cspSource);
-    }
-
-    void openNodePreview(focusNode).catch((error: unknown) => {
-      console.error('Failed to open OCI raw preview.', error);
+      this.panels.delete(webviewPanel);
     });
   }
+
+  refreshAll(layout: ParsedLayout): void {
+    for (const [panel, document] of this.panels) {
+      document.layout = layout;
+      const newKey = findNodeKeyForFile(layout, document.uri.fsPath);
+      if (newKey) {
+        document.focusKey = newKey;
+      }
+      this.updateWebview(panel, document);
+    }
+  }
+
+  private updateWebview(panel: vscode.WebviewPanel, document: OciDocument): void {
+    const node = document.layout.nodesByKey[document.focusKey];
+    if (!node) {
+      panel.webview.html = renderErrorHtml('Node not found in layout.');
+      return;
+    }
+
+    panel.title = node.label;
+    panel.webview.html = renderNodeHtml(node, document.layout);
+  }
+}
+
+function findLayoutRoot(filePath: string): string | null {
+  let dir = path.dirname(filePath);
+  for (let i = 0; i < 10; i++) {
+    if (isOciLayoutFolder(dir)) {
+      return dir;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      break;
+    }
+    dir = parent;
+  }
+  return null;
+}
+
+function findNodeKeyForFile(layout: ParsedLayout, filePath: string): string | null {
+  const resolved = path.resolve(filePath);
+  for (const node of layout.nodes) {
+    if (node.filePath && path.resolve(node.filePath) === resolved) {
+      return node.key;
+    }
+  }
+  return null;
 }

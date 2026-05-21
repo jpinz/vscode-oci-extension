@@ -75,6 +75,24 @@ export class OciTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 
     return Promise.resolve((element.children || []).map((child) => this.layout!.nodesByKey[child.key]));
   }
+
+  getParent(element: TreeNode): TreeNode | undefined {
+    if (!this.layout) {
+      return undefined;
+    }
+
+    for (const node of this.layout.nodes) {
+      if (node.children.some((child) => child.key === element.key)) {
+        return node;
+      }
+    }
+
+    return undefined;
+  }
+
+  findNode(key: string): TreeNode | undefined {
+    return this.layout ? this.layout.nodesByKey[key] : undefined;
+  }
 }
 
 function describeNode(node: TreeNode): string {

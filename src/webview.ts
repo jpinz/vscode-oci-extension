@@ -1,234 +1,429 @@
-import * as path from 'node:path';
 import { LayoutNode, ParsedLayout } from './ociLayout';
-import { isJsonNode } from './nodePreview';
 
-function escapeHtml(value: string | number | null | undefined): string {
-  return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
-function renderNodeButton(node: LayoutNode, relation: string): string {
-  const subtext = getNodeSubtext(node, relation);
-  return `<button class="link-button" data-action="focus" data-key="${escapeHtml(node.key)}">
-    <span>${escapeHtml(node.label)}</span>
-    <small>${escapeHtml(subtext)}</small>
-  </button>`;
-}
-
-function getNodeSubtext(node: LayoutNode, relation: string): string {
-  if (relation && relation !== getNodePrimaryName(node)) {
-    return `${relation} • ${node.kind}`;
-  }
-
-  return node.kind;
-}
-
-function getNodePrimaryName(node: Pick<LayoutNode, 'displayName' | 'name'>): string {
-  return node.displayName || node.name;
-}
-
-function describeNode(node: LayoutNode): string {
-  const details = [node.kind];
-  if (node.name && node.name !== getNodePrimaryName(node)) {
-    details.push(node.name);
-  }
-  if (node.mediaType) {
-    details.push(node.mediaType.replace(/^application\/vnd\./, ''));
-  }
-  if (node.digest) {
-    details.push(node.digest.slice(0, 19));
-  }
-  return details.join(' • ');
+function kindIcon(kind: string): string {
+  const icons: Record<string, string> = {
+    'image-index': '📑',
+    'image-manifest': '📦',
+    'config': '⚙️',
+    'layer': '🗄️',
+    'layout': '📂',
+    'blob': '📄'
+  };
+  return icons[kind] || '📄';
 }
 
 function renderMetadataTable(node: LayoutNode): string {
-  const rows: Array<[string, string]> = [
-    ['Kind', node.kind],
-    ['Media type', node.mediaType || '—'],
-    ['Digest', node.digest || '—'],
-    ['Size', node.size === null || node.size === undefined ? '—' : `${node.size} bytes`],
-    ['Path', node.filePath || '—']
-  ];
+  const rows: Array<[string, string]> = [];
 
-  if (node.displayName && node.displayName !== node.name) {
-    rows.unshift(['Display name', node.label]);
+  rows.push(['Kind', `${kindIcon(node.kind)} ${escapeHtml(node.kind)}`]);
+
+  if (node.mediaType) {
+    rows.push(['Media Type', `<code>${escapeHtml(node.mediaType)}</code>`]);
+  }
+  if (node.digest) {
+    rows.push(['Digest', `<code>${escapeHtml(node.digest)}</code>`]);
+  }
+  if (node.size !== null && node.size !== undefined) {
+    rows.push(['Size', formatBytes(node.size)]);
+  }
+  if (node.artifactType) {
+    rows.push(['Artifact Type', `<code>${escapeHtml(node.artifactType)}</code>`]);
+  }
+  if (node.platform) {
+    const parts = [node.platform.os, node.platform.architecture, node.platform.variant].filter(Boolean);
+    if (parts.length) {
+      rows.push(['Platform', escapeHtml(parts.join('/'))]);
+    }
   }
 
-  rows.unshift(['OCI relation', node.name || '—']);
-
-  return `<table>${rows.map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`).join('')}</table>`;
+  return `<table class="metadata">${rows.map(([label, value]) =>
+    `<tr><th>${escapeHtml(label)}</th><td>${value}</td></tr>`
+  ).join('')}</table>`;
 }
 
-function renderChildren(layout: ParsedLayout, node: LayoutNode): string {
+function renderAnnotations(annotations: Record<string, string> | null | undefined): string {
+  if (!annotations || Object.keys(annotations).length === 0) {
+    return '';
+  }
+
+  const rows = Object.entries(annotations).map(([key, value]) =>
+    `<tr><td><code>${escapeHtml(key)}</code></td><td>${escapeHtml(String(value))}</td></tr>`
+  ).join('');
+
+  return `
+    <details open>
+      <summary>Annotations (${Object.keys(annotations).length})</summary>
+      <table class="annotations">${rows}</table>
+    </details>`;
+}
+
+function findParent(node: LayoutNode, layout: ParsedLayout): LayoutNode | null {
+  for (const candidate of layout.nodes) {
+    if (candidate.children.some((child) => child.key === node.key)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function renderParent(node: LayoutNode, layout: ParsedLayout): string {
+  const parent = findParent(node, layout);
+  if (!parent) {
+    return '';
+  }
+
+  const label = parent.label || parent.name;
+  return `<div class="parent-link">
+    ↑ <a href="#" class="child-link" data-key="${escapeHtml(parent.key)}">${kindIcon(parent.kind)} ${escapeHtml(label)}</a>
+  </div>`;
+}
+
+function renderChildItem(child: { relation: string; key: string }, layout: ParsedLayout): string {
+  const childNode = layout.nodesByKey[child.key];
+  if (!childNode) {
+    return `<li class="child-item">${escapeHtml(child.relation)} — <em>missing</em></li>`;
+  }
+
+  const label = childNode.label || childNode.name || child.relation;
+  const desc = childNode.mediaType
+    ? ` <span class="child-meta">${escapeHtml(childNode.mediaType.replace(/^application\/vnd\./, ''))}</span>`
+    : '';
+  const digestSnippet = childNode.digest
+    ? ` <span class="child-digest">${escapeHtml(childNode.digest.slice(0, 19))}…</span>`
+    : '';
+
+  return `<li class="child-item">
+    <span class="child-relation">${escapeHtml(child.relation)}</span>
+    <a href="#" class="child-link" data-key="${escapeHtml(child.key)}">${kindIcon(childNode.kind)} ${escapeHtml(label)}</a>
+    ${desc}${digestSnippet}
+  </li>`;
+}
+
+function isTarLayer(child: { key: string }, layout: ParsedLayout): boolean {
+  const childNode = layout.nodesByKey[child.key];
+  if (!childNode || childNode.kind !== 'layer') {
+    return false;
+  }
+  const mt = childNode.mediaType || '';
+  return mt.includes('tar') || (!mt.includes('json') && !mt.includes('xml') && !mt.includes('text'));
+}
+
+function renderChildren(node: LayoutNode, layout: ParsedLayout): string {
   if (!node.children || node.children.length === 0) {
-    return '<p class="empty">No linked OCI descriptors.</p>';
+    return '';
   }
 
-  return `<div class="link-list">${node.children.map((child) => renderNodeButton(layout.nodesByKey[child.key], child.relation)).join('')}</div>`;
+  const mainChildren = node.children.filter((child) => !isTarLayer(child, layout));
+  const tarLayers = node.children.filter((child) => isTarLayer(child, layout));
+
+  let html = '';
+
+  if (mainChildren.length > 0) {
+    const items = mainChildren.map((child) => renderChildItem(child, layout)).join('');
+    html += `
+    <details open>
+      <summary>Children (${mainChildren.length})</summary>
+      <ul class="children">${items}</ul>
+    </details>`;
+  }
+
+  if (tarLayers.length > 0) {
+    const items = tarLayers.map((child) => renderChildItem(child, layout)).join('');
+    html += `
+    <details>
+      <summary>Binary Layers (${tarLayers.length})</summary>
+      <ul class="children">${items}</ul>
+    </details>`;
+  }
+
+  return html;
 }
 
-function createNonce(): string {
-  return `${Date.now()}${Math.random().toString(16).slice(2)}`;
+function renderJsonContent(node: LayoutNode): string {
+  if (node.parseError) {
+    return `<details><summary>Raw Content</summary><pre class="json-error">Parse error: ${escapeHtml(node.parseError)}</pre></details>`;
+  }
+  if (!node.json) {
+    return '';
+  }
+
+  return `
+    <details id="jsonDetails">
+      <summary>JSON Content</summary>
+      <pre class="json-content"><code id="jsonContent">Loading…</code></pre>
+    </details>`;
 }
 
-function getPanelTitle(layout: ParsedLayout, focusNode: LayoutNode): string {
-  return `OCI Layout: ${path.basename(layout.rootPath)} • ${focusNode.label}`;
+function formatBytes(bytes: number): string {
+  if (bytes === 0) { return '0 B'; }
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / Math.pow(1024, i);
+  return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
-export function renderLayoutErrorHtml(rootPath: string, cspSource: string): string {
-  const nonce = createNonce();
+export function renderNodeHtml(node: LayoutNode, layout: ParsedLayout): string {
   return `<!DOCTYPE html>
-  <html lang="en">
-    <head>
-      <meta charset="UTF-8" />
-      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';" />
-      <title>OCI Layout Unavailable</title>
-      <style>
-        body {
-          font-family: var(--vscode-font-family);
-          color: var(--vscode-editor-foreground);
-          background: var(--vscode-editor-background);
-          margin: 0;
-          padding: 1rem;
-        }
-        .card {
-          border: 1px solid var(--vscode-panel-border);
-          border-radius: 8px;
-          padding: 0.9rem;
-        }
-      </style>
-    </head>
-    <body>
-      <section class="card">
-        <h2>Unable to parse OCI layout</h2>
-        <p>The folder does not currently contain a valid OCI layout.</p>
-        <p><strong>Path:</strong> ${escapeHtml(rootPath)}</p>
-      </section>
-    </body>
-  </html>`;
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>${CSS}</style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>${kindIcon(node.kind)} ${escapeHtml(node.label)}</h1>
+      ${node.displayName && node.displayName !== node.label
+        ? `<p class="display-name">${escapeHtml(node.displayName)}</p>` : ''}
+      <button class="open-raw" id="openRawBtn">Open Raw File</button>
+    </header>
+
+    ${renderParent(node, layout)}
+    ${renderMetadataTable(node)}
+    ${renderAnnotations(node.annotations)}
+    ${renderChildren(node, layout)}
+    ${renderJsonContent(node)}
+  </div>
+
+  <script>${SCRIPT}</script>
+</body>
+</html>`;
 }
 
-export function renderWebviewHtml(layout: ParsedLayout, focusKey: string, cspSource: string): string {
-  const focusNode = layout.nodesByKey[focusKey] || layout.nodesByKey[layout.roots[1]];
-  const summaryCards: Array<[string, string | number]> = [
-    ['Root folder', layout.rootPath],
-    ['Layout version', layout.layoutVersion || 'unknown'],
-    ['Descriptors', Object.values(layout.nodesByKey).filter((node) => node.digest).length]
-  ];
-  const canPreview = !!focusNode.filePath;
-  const previewDescription = isJsonNode(focusNode)
-    ? 'Raw preview is shown in the VS Code editor for syntax highlighting and JSON folding.'
-    : 'Raw preview is shown in the VS Code editor when content is text-readable.';
-  const nonce = createNonce();
-  const title = getPanelTitle(layout, focusNode);
-
+export function renderErrorHtml(message: string): string {
   return `<!DOCTYPE html>
-  <html lang="en">
-    <head>
-      <meta charset="UTF-8" />
-      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';" />
-      <title>${escapeHtml(title)}</title>
-      <style>
-        :root { color-scheme: light dark; }
-        body {
-          font-family: var(--vscode-font-family);
-          color: var(--vscode-editor-foreground);
-          background: var(--vscode-editor-background);
-          margin: 0;
-          padding: 1rem;
-        }
-        h1, h2, h3 { margin: 0 0 0.75rem; }
-        .grid { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-        .card {
-          border: 1px solid var(--vscode-panel-border);
-          border-radius: 8px;
-          padding: 0.9rem;
-          background: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-textBlockQuote-background) 8%);
-        }
-        .layout { display: grid; gap: 1rem; grid-template-columns: 1.25fr 1fr; margin-top: 1rem; }
-        @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
-        table { border-collapse: collapse; width: 100%; }
-        th, td {
-          text-align: left;
-          vertical-align: top;
-          padding: 0.35rem 0;
-          border-bottom: 1px solid var(--vscode-panel-border);
-        }
-        th { width: 8rem; font-weight: 600; }
-        .link-list { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-        .link-button, .action-button {
-          border: 1px solid var(--vscode-button-border, transparent);
-          background: var(--vscode-button-background);
-          color: var(--vscode-button-foreground);
-          border-radius: 6px;
-          cursor: pointer;
-          padding: 0.5rem 0.75rem;
-          text-align: left;
-        }
-        .link-button small { display: block; opacity: 0.75; }
-        .action-button.secondary {
-          background: transparent;
-          color: var(--vscode-textLink-foreground);
-          border-color: var(--vscode-panel-border);
-        }
-        .toolbar { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
-        .empty { opacity: 0.75; margin: 0; }
-      </style>
-    </head>
-    <body>
-      <h1>${escapeHtml(focusNode.label)}</h1>
-      <div class="grid">
-        ${summaryCards.map(([label, value]) => `<section class="card"><h3>${escapeHtml(label)}</h3><div>${escapeHtml(value)}</div></section>`).join('')}
-      </div>
-      <div class="layout">
-        <section class="card">
-          <h2>Descriptor details</h2>
-          <p>${escapeHtml(describeNode(focusNode))}</p>
-          <div class="toolbar">
-            <button class="action-button" data-action="open" data-key="${escapeHtml(focusNode.key)}">Open raw file</button>
-          </div>
-          ${renderMetadataTable(focusNode)}
-          <h3 style="margin-top:1rem;">Linked descriptors</h3>
-          ${renderChildren(layout, focusNode)}
-        </section>
-        <section class="card">
-          <h2>Navigation</h2>
-          <div class="toolbar">
-            <button class="action-button secondary" data-action="home" data-key="${escapeHtml(layout.roots[1])}">Root</button>
-          </div>
-          <h3>Raw preview</h3>
-          ${canPreview
-    ? `<p class="empty">${escapeHtml(previewDescription)}</p>
-             <div class="toolbar">
-               <button class="action-button secondary" data-action="preview" data-key="${escapeHtml(focusNode.key)}">Reveal raw preview</button>
-             </div>`
-    : '<p class="empty">No associated file for this node.</p>'}
-        </section>
-      </div>
-      <script nonce="${nonce}">
-        const vscode = acquireVsCodeApi();
-        document.addEventListener('click', (event) => {
-          const target = event.target.closest('[data-action]');
-          if (!target) {
-            return;
-          }
-
-          const command = target.dataset.action === 'focus'
-            ? 'focusNode'
-            : target.dataset.action === 'home'
-              ? 'goHome'
-              : target.dataset.action === 'preview'
-                ? 'openPreview'
-              : 'openFile';
-          vscode.postMessage({ command, key: target.dataset.key });
-        });
-      </script>
-    </body>
-  </html>`;
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>${CSS}</style>
+</head>
+<body>
+  <div class="container">
+    <div class="error-box">
+      <h2>Error</h2>
+      <p>${escapeHtml(message)}</p>
+    </div>
+  </div>
+</body>
+</html>`;
 }
+
+const SCRIPT = `
+  const vscode = acquireVsCodeApi();
+
+  document.getElementById('openRawBtn')?.addEventListener('click', () => {
+    vscode.postMessage({ command: 'openRawFile' });
+  });
+
+  document.querySelectorAll('.child-link').forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const key = e.currentTarget.getAttribute('data-key');
+      if (key) {
+        vscode.postMessage({ command: 'focusNode', key });
+      }
+    });
+  });
+
+  const jsonDetails = document.getElementById('jsonDetails');
+  let jsonLoaded = false;
+  if (jsonDetails) {
+    jsonDetails.addEventListener('toggle', () => {
+      if (jsonDetails.open && !jsonLoaded) {
+        jsonLoaded = true;
+        vscode.postMessage({ command: 'loadJson' });
+      }
+    });
+  }
+
+  window.addEventListener('message', (event) => {
+    const msg = event.data;
+    if (msg.command === 'jsonContent') {
+      const el = document.getElementById('jsonContent');
+      if (el) {
+        el.textContent = msg.content;
+      }
+    }
+  });
+`;
+
+const CSS = `
+  :root {
+    --bg: var(--vscode-editor-background);
+    --fg: var(--vscode-editor-foreground);
+    --border: var(--vscode-panel-border, var(--vscode-widget-border, #444));
+    --link: var(--vscode-textLink-foreground, #3794ff);
+    --header-bg: var(--vscode-sideBarSectionHeader-background, transparent);
+    --badge-bg: var(--vscode-badge-background, #4d4d4d);
+    --badge-fg: var(--vscode-badge-foreground, #fff);
+    --code-bg: var(--vscode-textCodeBlock-background, #1e1e1e);
+    --button-bg: var(--vscode-button-background, #0e639c);
+    --button-fg: var(--vscode-button-foreground, #fff);
+    --button-hover: var(--vscode-button-hoverBackground, #1177bb);
+    --error-bg: var(--vscode-inputValidation-errorBackground, #5a1d1d);
+    --error-border: var(--vscode-inputValidation-errorBorder, #be1100);
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--vscode-font-family, system-ui, sans-serif);
+    font-size: var(--vscode-font-size, 13px);
+    line-height: 1.5;
+    margin: 0;
+    padding: 0;
+  }
+
+  .container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+
+  header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 1.4em;
+    font-weight: 600;
+  }
+
+  .display-name {
+    margin: 0;
+    opacity: 0.7;
+    font-size: 0.9em;
+  }
+
+  .open-raw {
+    margin-left: auto;
+    background: var(--button-bg);
+    color: var(--button-fg);
+    border: none;
+    padding: 4px 12px;
+    border-radius: 2px;
+    cursor: pointer;
+    font-size: 0.85em;
+  }
+  .open-raw:hover { background: var(--button-hover); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8px 0;
+  }
+
+  .metadata th {
+    text-align: left;
+    width: 120px;
+    padding: 4px 12px 4px 0;
+    opacity: 0.7;
+    font-weight: normal;
+    vertical-align: top;
+    white-space: nowrap;
+  }
+  .metadata td {
+    padding: 4px 0;
+    word-break: break-all;
+  }
+
+  .annotations td {
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border);
+    word-break: break-all;
+  }
+  .annotations td:first-child {
+    white-space: nowrap;
+    width: 1%;
+  }
+
+  details {
+    margin: 16px 0;
+  }
+  summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    user-select: none;
+  }
+
+  .children {
+    list-style: none;
+    padding: 0;
+    margin: 8px 0;
+  }
+  .child-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .child-relation {
+    background: var(--badge-bg);
+    color: var(--badge-fg);
+    padding: 1px 6px;
+    border-radius: 2px;
+    font-size: 0.8em;
+    white-space: nowrap;
+  }
+  .child-link {
+    color: var(--link);
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .child-link:hover { text-decoration: underline; }
+  .parent-link {
+    margin-bottom: 16px;
+    font-size: 0.95em;
+  }
+  .child-meta {
+    opacity: 0.6;
+    font-size: 0.85em;
+  }
+  .child-digest {
+    opacity: 0.45;
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 0.8em;
+  }
+
+  code {
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 0.9em;
+  }
+
+  .json-content, .json-error {
+    background: var(--code-bg);
+    padding: 12px;
+    border-radius: 4px;
+    overflow-x: auto;
+    font-size: 0.85em;
+    max-height: 500px;
+    overflow-y: auto;
+  }
+
+  .error-box {
+    background: var(--error-bg);
+    border: 1px solid var(--error-border);
+    padding: 16px;
+    border-radius: 4px;
+  }
+  .error-box h2 { margin-top: 0; }
+`;
