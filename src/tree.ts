@@ -80,7 +80,7 @@ export class OciTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       return Promise.resolve([
         {
           key: 'empty',
-          label: 'Open an OCI layout folder',
+          label: 'Use Explore Image to open a folder or pull/export an image',
           kind: 'info',
           children: [],
           filePath: null

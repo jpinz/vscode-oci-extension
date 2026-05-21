@@ -33,12 +33,18 @@
         "title": "Open OCI Layout Folder"
       },
       {
+        "command": "ociExplorer.exploreImage",
+        "title": "Explore Image",
+        "icon": "$(search)"
+      },
+      {
         "command": "ociExplorer.openLayoutFromExplorer",
         "title": "Open as OCI Layout"
       },
       {
         "command": "ociExplorer.refresh",
-        "title": "Refresh OCI Layout"
+        "title": "Refresh OCI Layout",
+        "icon": "$(refresh)"
       },
       {
         "command": "ociExplorer.openRawFile",
@@ -113,7 +119,7 @@
       ],
       "view/title": [
         {
-          "command": "ociExplorer.openLayout",
+          "command": "ociExplorer.exploreImage",
           "when": "view == ociExplorer.layout || view == ociExplorer.layout.integrated",
           "group": "navigation"
         },
@@ -126,6 +132,11 @@
           "command": "ociExplorer.docker.refresh",
           "when": "view == ociExplorer.dockerImages",
           "group": "navigation"
+        },
+        {
+          "command": "ociExplorer.exploreImage",
+          "when": "view == ociExplorer.dockerImages",
+          "group": "navigation@1"
         }
       ],
       "view/item/context": [

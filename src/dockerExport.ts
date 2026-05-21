@@ -1,5 +1,4 @@
 import * as childProcess from 'node:child_process';
-import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -9,24 +8,27 @@ import { resolveExportDir } from './config/exportPath';
 
 const outputChannel = vscode.window.createOutputChannel('OCI Export');
 
-interface DockerManifestEntry {
-  Config: string;
-  RepoTags: string[] | null;
-  Layers: string[];
-}
-
 interface ExportMetadata {
   reference: string;
   exportedAt: string;
-  source: 'docker-daemon';
-  tool: 'skopeo' | 'docker-save';
+  source: 'docker-daemon' | 'registry';
+  tool: 'skopeo' | 'docker-save' | 'oras';
 }
 
-function writeExportMetadata(outputDir: string, reference: string, tool: ExportMetadata['tool']): void {
+interface ExportImageOptions {
+  source?: 'docker-daemon' | 'registry';
+}
+
+function writeExportMetadata(
+  outputDir: string,
+  reference: string,
+  source: ExportMetadata['source'],
+  tool: ExportMetadata['tool']
+): void {
   const metadata: ExportMetadata = {
     reference,
     exportedAt: new Date().toISOString(),
-    source: 'docker-daemon',
+    source,
     tool
   };
   fs.writeFileSync(path.join(outputDir, METADATA_FILENAME), JSON.stringify(metadata, null, 2));
@@ -92,137 +94,113 @@ async function isCommandAvailable(command: string): Promise<boolean> {
   }
 }
 
-async function computeFileHash(filePath: string): Promise<{ digest: string; size: number }> {
-  return new Promise((resolve, reject) => {
-    const hash = crypto.createHash('sha256');
-    let size = 0;
-    const stream = fs.createReadStream(filePath);
-    stream.on('data', (data: Buffer | string) => {
-      hash.update(data);
-      size += typeof data === 'string' ? Buffer.byteLength(data) : data.length;
-    });
-    stream.on('end', () => resolve({ digest: hash.digest('hex'), size }));
-    stream.on('error', reject);
-  });
-}
-
-function computeBufferHash(buffer: Buffer): { digest: string; size: number } {
-  const hash = crypto.createHash('sha256');
-  hash.update(buffer);
-  return { digest: hash.digest('hex'), size: buffer.length };
-}
-
-async function exportWithSkopeo(reference: string, outputDir: string): Promise<void> {
+async function exportWithSkopeo(
+  reference: string,
+  outputDir: string,
+  source: ExportMetadata['source']
+): Promise<void> {
   outputChannel.appendLine(`Exporting ${reference} with skopeo…`);
   outputChannel.show(true);
-  await spawnWithOutput('skopeo', ['copy', `docker-daemon:${reference}`, `oci:${outputDir}`]);
-  writeExportMetadata(outputDir, reference, 'skopeo');
+  const inputReference = source === 'registry' ? `docker://${reference}` : `docker-daemon:${reference}`;
+  await spawnWithOutput('skopeo', ['copy', '--all', inputReference, `oci:${outputDir}`]);
+  writeExportMetadata(outputDir, reference, source, 'skopeo');
   outputChannel.appendLine('skopeo export complete.');
 }
 
-async function exportWithDockerSave(reference: string, outputDir: string): Promise<void> {
+function getReferenceTag(reference: string): string | null {
+  const lastSlash = reference.lastIndexOf('/');
+  const lastColon = reference.lastIndexOf(':');
+  if (lastColon > lastSlash) {
+    return reference.slice(lastColon + 1);
+  }
+
+  return null;
+}
+
+function asTaggedLayoutRef(layoutPath: string, tag: string): string {
+  return `${layoutPath}:${tag}`;
+}
+
+async function convertArchiveToOciLayout(
+  archivePath: string,
+  outputDir: string,
+  reference: string
+): Promise<void> {
+  outputChannel.appendLine('Converting archive to OCI layout with oras…');
+  outputChannel.show(true);
+
+  const requestedTag = getReferenceTag(reference);
+  const destinationTag = requestedTag ?? 'latest';
+  const candidateTags = Array.from(new Set([requestedTag, 'latest'].filter((tag): tag is string => Boolean(tag))));
+
+  let lastError: unknown;
+  for (const sourceTag of candidateTags) {
+    try {
+      await spawnWithOutput('oras', [
+        'cp',
+        '--from-oci-layout',
+        asTaggedLayoutRef(archivePath, sourceTag),
+        '--to-oci-layout',
+        asTaggedLayoutRef(outputDir, destinationTag)
+      ]);
+      return;
+    } catch (error) {
+      lastError = error;
+      outputChannel.appendLine(`oras copy failed for source tag ${sourceTag}; trying next option...`);
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error('Failed to convert archive with oras using available tag candidates.');
+}
+
+async function exportWithDockerSave(
+  reference: string,
+  outputDir: string,
+  source: ExportMetadata['source']
+): Promise<void> {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oci-export-'));
 
   try {
     const tarPath = path.join(tempDir, 'image.tar');
-    const extractDir = path.join(tempDir, 'extracted');
-    fs.mkdirSync(extractDir, { recursive: true });
 
     outputChannel.appendLine(`Saving ${reference} with docker save…`);
     outputChannel.show(true);
     await spawnWithOutput('docker', ['save', reference, '-o', tarPath]);
-    outputChannel.appendLine('Extracting tar…');
-    await spawnWithOutput('tar', ['xf', tarPath, '-C', extractDir]);
-    outputChannel.appendLine('Converting to OCI layout…');
-    await convertDockerSaveToOci(extractDir, outputDir, reference);
-    writeExportMetadata(outputDir, reference, 'docker-save');
+    await convertArchiveToOciLayout(tarPath, outputDir, reference);
+    writeExportMetadata(outputDir, reference, source, 'oras');
     outputChannel.appendLine('Conversion complete.');
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 }
 
-async function convertDockerSaveToOci(
-  extractDir: string,
-  outputDir: string,
-  reference: string
-): Promise<void> {
-  const manifestPath = path.join(extractDir, 'manifest.json');
-  const manifestJson = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as DockerManifestEntry[];
+async function exportRegistryDirect(reference: string, outputDir: string): Promise<void> {
+  outputChannel.appendLine(`Copying ${reference} directly from registry with oras…`);
+  outputChannel.show(true);
 
-  if (manifestJson.length === 0) {
-    throw new Error('Docker save produced an empty manifest.');
-  }
+  const destinationTag = getReferenceTag(reference) ?? 'latest';
+  await spawnWithOutput('oras', [
+    'cp',
+    '--recursive',
+    reference,
+    '--to-oci-layout',
+    asTaggedLayoutRef(outputDir, destinationTag)
+  ]);
 
-  const blobsDir = path.join(outputDir, 'blobs', 'sha256');
-  fs.mkdirSync(blobsDir, { recursive: true });
-
-  fs.writeFileSync(
-    path.join(outputDir, 'oci-layout'),
-    JSON.stringify({ imageLayoutVersion: '1.0.0' })
-  );
-
-  const indexManifests: Array<{
-    mediaType: string;
-    digest: string;
-    size: number;
-    annotations?: Record<string, string>;
-  }> = [];
-
-  for (const entry of manifestJson) {
-    const configContent = fs.readFileSync(path.join(extractDir, entry.Config));
-    const configHash = computeBufferHash(configContent);
-    fs.writeFileSync(path.join(blobsDir, configHash.digest), configContent);
-
-    const layerDescriptors: Array<{ mediaType: string; digest: string; size: number }> = [];
-
-    for (const layerRelPath of entry.Layers) {
-      const layerSrcPath = path.join(extractDir, layerRelPath);
-      const layerHash = await computeFileHash(layerSrcPath);
-      fs.copyFileSync(layerSrcPath, path.join(blobsDir, layerHash.digest));
-
-      layerDescriptors.push({
-        mediaType: 'application/vnd.oci.image.layer.v1.tar',
-        digest: `sha256:${layerHash.digest}`,
-        size: layerHash.size,
-      });
-    }
-
-    const ociManifest = {
-      schemaVersion: 2,
-      mediaType: 'application/vnd.oci.image.manifest.v1+json',
-      config: {
-        mediaType: 'application/vnd.oci.image.config.v1+json',
-        digest: `sha256:${configHash.digest}`,
-        size: configHash.size,
-      },
-      layers: layerDescriptors,
-    };
-
-    const manifestBuffer = Buffer.from(JSON.stringify(ociManifest, null, 2));
-    const manifestHash = computeBufferHash(manifestBuffer);
-    fs.writeFileSync(path.join(blobsDir, manifestHash.digest), manifestBuffer);
-
-    const tag = entry.RepoTags && entry.RepoTags[0] ? entry.RepoTags[0] : reference;
-    indexManifests.push({
-      mediaType: 'application/vnd.oci.image.manifest.v1+json',
-      digest: `sha256:${manifestHash.digest}`,
-      size: manifestHash.size,
-      annotations: { 'org.opencontainers.image.ref.name': tag },
-    });
-  }
-
-  fs.writeFileSync(
-    path.join(outputDir, 'index.json'),
-    JSON.stringify(
-      { schemaVersion: 2, mediaType: 'application/vnd.oci.image.index.v1+json', manifests: indexManifests },
-      null,
-      2
-    )
-  );
+  writeExportMetadata(outputDir, reference, 'registry', 'oras');
+  outputChannel.appendLine('Direct registry export complete.');
 }
 
-export async function exportImageToOciLayout(reference: string): Promise<string> {
+async function pullImage(reference: string): Promise<void> {
+  outputChannel.appendLine(`Pulling ${reference} from registry with docker…`);
+  outputChannel.show(true);
+  await spawnWithOutput('docker', ['pull', reference]);
+}
+
+export async function exportImageToOciLayout(reference: string, options?: ExportImageOptions): Promise<string> {
+  const source = options?.source ?? 'docker-daemon';
   const configuredDir = await resolveExportDir();
   const imageDirName = sanitizeImageName(reference);
 
@@ -238,12 +216,33 @@ export async function exportImageToOciLayout(reference: string): Promise<string>
   }
   fs.mkdirSync(outputDir, { recursive: true });
 
+  if (source === 'registry') {
+    const hasOras = await isCommandAvailable('oras');
+    if (hasOras) {
+      try {
+        await exportRegistryDirect(reference, outputDir);
+        return outputDir;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        outputChannel.appendLine(`Direct registry copy failed: ${message}`);
+        outputChannel.appendLine('Falling back to skopeo/docker-based export path.');
+      }
+    }
+  }
+
   const hasSkopeo = await isCommandAvailable('skopeo');
   if (hasSkopeo) {
-    await exportWithSkopeo(reference, outputDir);
-  } else {
-    await exportWithDockerSave(reference, outputDir);
+    await exportWithSkopeo(reference, outputDir, source);
+    return outputDir;
   }
+
+  if (source === 'registry') {
+    await pullImage(reference);
+  }
+  if (!(await isCommandAvailable('oras'))) {
+    throw new Error('oras is required for docker-save conversion when skopeo is unavailable.');
+  }
+  await exportWithDockerSave(reference, outputDir, source);
 
   return outputDir;
 }

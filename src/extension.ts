@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { CONTEXT_UPDATE_DEBOUNCE_MS } from './constants';
 import { OciBlobEditorProvider } from './customEditor';
 import { exportImageToOciLayout } from './dockerExport';
+import { listImages } from './docker';
 import { DockerImageNode, DockerImageTreeProvider } from './dockerTree';
 import { LayoutNode, parseLayout } from './ociLayout';
 import { openNodeFile } from './nodePreview';
@@ -17,6 +18,70 @@ async function promptForLayoutFolder(): Promise<string | null> {
   });
 
   return selected && selected[0] ? selected[0].fsPath : null;
+}
+
+type ExploreImageMode = 'folder' | 'daemon' | 'registry';
+
+async function promptForExploreMode(): Promise<ExploreImageMode | null> {
+  const selection = await vscode.window.showQuickPick(
+    [
+      { label: 'Open OCI layout folder', mode: 'folder' as const },
+      { label: 'Use image from Docker daemon', mode: 'daemon' as const },
+      { label: 'Pull image from registry', mode: 'registry' as const }
+    ],
+    {
+      placeHolder: 'Explore Image: choose an image source',
+      ignoreFocusOut: true
+    }
+  );
+
+  return selection?.mode ?? null;
+}
+
+async function promptForDaemonImageReference(): Promise<string | null> {
+  const rawImages = await listImages();
+  const references: string[] = [];
+
+  for (const image of rawImages) {
+    const tags = image.RepoTags ?? [];
+    if (tags.length === 0 || (tags.length === 1 && tags[0] === '<none>:<none>')) {
+      references.push(image.Id);
+      continue;
+    }
+
+    for (const tag of tags) {
+      references.push(tag);
+    }
+  }
+
+  const items = Array.from(new Set(references)).sort((a, b) => a.localeCompare(b)).map((reference) => ({
+    label: reference
+  }));
+
+  if (items.length === 0) {
+    throw new Error('No Docker images were found in the daemon.');
+  }
+
+  const selected = await vscode.window.showQuickPick(items, {
+    placeHolder: 'Select a Docker image to export as an OCI layout',
+    ignoreFocusOut: true,
+    matchOnDescription: true,
+    matchOnDetail: true
+  });
+
+  return selected?.label ?? null;
+}
+
+async function promptForRegistryReference(): Promise<string | null> {
+  const value = await vscode.window.showInputBox({
+    title: 'Pull image from registry',
+    prompt: 'Enter a full image reference (for example ghcr.io/org/image:tag)',
+    placeHolder: 'registry/repository[:tag]|[@digest]',
+    ignoreFocusOut: true,
+    validateInput: (input) => input.trim() ? null : 'Image reference is required.'
+  });
+
+  return value?.trim() || null;
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -149,6 +214,46 @@ export function activate(context: vscode.ExtensionContext): void {
         : await promptForLayoutFolder();
       if (rootPath) {
         await refreshFromPath(rootPath);
+      }
+    }),
+    vscode.commands.registerCommand('ociExplorer.exploreImage', async () => {
+      try {
+        const mode = await promptForExploreMode();
+        if (!mode) {
+          return;
+        }
+
+        if (mode === 'folder') {
+          const rootPath = await promptForLayoutFolder();
+          if (rootPath) {
+            await refreshFromPath(rootPath);
+          }
+          return;
+        }
+
+        const reference = mode === 'daemon'
+          ? await promptForDaemonImageReference()
+          : await promptForRegistryReference();
+
+        if (!reference) {
+          return;
+        }
+
+        const outputDir = await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: mode === 'registry'
+              ? `Pulling ${reference} and exporting to OCI layout…`
+              : `Exporting ${reference} to OCI layout…`,
+            cancellable: false
+          },
+          () => exportImageToOciLayout(reference, { source: mode === 'registry' ? 'registry' : 'docker-daemon' })
+        );
+
+        await refreshFromPath(outputDir);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        void vscode.window.showErrorMessage(`Explore Image failed: ${message}`);
       }
     }),
     vscode.commands.registerCommand('ociExplorer.openLayoutFromExplorer', async (resource?: vscode.Uri) => {
