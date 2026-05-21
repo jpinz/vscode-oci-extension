@@ -42,9 +42,16 @@ export class OciTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<TreeNode | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
   layout: ParsedLayout | null = null;
+  private loading = false;
 
   setLayout(layout: ParsedLayout | null): void {
     this.layout = layout;
+    this.loading = false;
+    this.refresh();
+  }
+
+  setLoading(): void {
+    this.loading = true;
     this.refresh();
   }
 
@@ -57,6 +64,18 @@ export class OciTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   }
 
   getChildren(element?: TreeNode): Thenable<TreeNode[]> {
+    if (this.loading) {
+      return Promise.resolve([
+        {
+          key: 'loading',
+          label: '$(loading~spin) Loading layout…',
+          kind: 'info' as const,
+          children: [] as [],
+          filePath: null
+        }
+      ]);
+    }
+
     if (!this.layout) {
       return Promise.resolve([
         {

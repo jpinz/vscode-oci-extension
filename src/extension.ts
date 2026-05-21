@@ -86,12 +86,18 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
 
+    treeProvider.setLoading();
+
     try {
-      const layout = parseLayout(rootPath);
+      const layout = await vscode.window.withProgress(
+        { location: { viewId: layoutViewId } },
+        async () => parseLayout(rootPath)
+      );
       treeProvider.setLayout(layout);
       editorProvider.refreshAll(layout);
       await context.workspaceState.update('ociExplorer.rootPath', rootPath);
     } catch (error) {
+      treeProvider.setLayout(null);
       const message = error instanceof Error ? error.message : String(error);
       void vscode.window.showErrorMessage(message);
     }
