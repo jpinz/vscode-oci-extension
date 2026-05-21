@@ -106,8 +106,6 @@ async function exportWithSkopeo(
   await spawnWithOutput('skopeo', [
     'copy',
     '--all',
-    '--multi-arch',
-    'all',
     '--format',
     'oci',
     inputReference,
