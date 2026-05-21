@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check types
+        run: npm run check-types
+
+      - name: Bundle
+        run: node esbuild.js
+
+      - name: Compile tests
+        run: npm run compile-tests
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Run VS Code tests (Linux)
+        run: xvfb-run -a npm run test:vscode
+        if: runner.os == 'Linux'
+
+      - name: Run VS Code tests (non-Linux)
+        run: npm run test:vscode
+        if: runner.os != 'Linux'
