@@ -4,6 +4,10 @@
   "description": "Interactively explore container images saved as OCI image layouts.",
   "version": "0.0.1",
   "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jpinz/vscode-oci-extension"
+  },
   "engines": {
     "vscode": "^1.120.0"
   },
