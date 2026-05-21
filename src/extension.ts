@@ -2,6 +2,8 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { CONTEXT_UPDATE_DEBOUNCE_MS } from './constants';
 import { OciBlobEditorProvider } from './customEditor';
+import { exportImageToOciLayout } from './dockerExport';
+import { DockerImageNode, DockerImageTreeProvider } from './dockerTree';
 import { LayoutNode, parseLayout } from './ociLayout';
 import { openNodeFile } from './nodePreview';
 import { OciTreeProvider } from './tree';
@@ -18,6 +20,9 @@ async function promptForLayoutFolder(): Promise<string | null> {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+  const containerToolsActive = vscode.extensions.getExtension('ms-azuretools.vscode-containers') !== undefined;
+  void vscode.commands.executeCommand('setContext', 'ociExplorer.containerToolsActive', containerToolsActive);
+
   const treeProvider = new OciTreeProvider();
   const editorProvider = new OciBlobEditorProvider();
   let contextUpdateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -109,7 +114,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
   scheduleLayoutFolderContextUpdate();
 
-  const treeView = vscode.window.createTreeView('ociExplorer.layout', {
+  const layoutViewId = containerToolsActive ? 'ociExplorer.layout.integrated' : 'ociExplorer.layout';
+  const treeView = vscode.window.createTreeView(layoutViewId, {
     treeDataProvider: treeProvider,
     showCollapseAll: true
   });
@@ -173,6 +179,64 @@ export function activate(context: vscode.ExtensionContext): void {
           vscode.Uri.file(node.filePath),
           OciBlobEditorProvider.viewType
         );
+      }
+    })
+  );
+
+  // Docker images tree view (only when Container Tools is not installed)
+  if (!containerToolsActive) {
+    const dockerTreeProvider = new DockerImageTreeProvider();
+    const dockerTreeView = vscode.window.createTreeView('ociExplorer.dockerImages', {
+      treeDataProvider: dockerTreeProvider,
+      showCollapseAll: false
+    });
+
+    dockerTreeView.onDidChangeVisibility((e) => {
+      if (e.visible && dockerTreeProvider.getError() !== null) {
+        void dockerTreeProvider.refresh();
+      }
+    });
+
+    void dockerTreeProvider.refresh();
+
+    context.subscriptions.push(
+      dockerTreeView,
+      vscode.commands.registerCommand('ociExplorer.docker.refresh', () => dockerTreeProvider.refresh())
+    );
+  }
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('ociExplorer.docker.openAsOciLayout', async (node?: unknown) => {
+      if (!node || typeof node !== 'object') {
+        return;
+      }
+
+      const item = node as Record<string, unknown>;
+      const reference = typeof item.reference === 'string'
+        ? item.reference
+        : typeof item.fullTag === 'string'
+          ? item.fullTag
+          : null;
+
+      if (!reference) {
+        void vscode.window.showErrorMessage('Could not determine image reference.');
+        return;
+      }
+
+      try {
+        const outputDir = await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: `Exporting ${reference} to OCI layout…`,
+            cancellable: false
+          },
+          () => exportImageToOciLayout(reference)
+        );
+
+        await refreshFromPath(outputDir);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        void vscode.window.showErrorMessage(`Failed to export image: ${message}`);
       }
     })
   );

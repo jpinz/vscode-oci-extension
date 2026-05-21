@@ -97,7 +97,7 @@ export class OciTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 
 function describeNode(node: TreeNode): string {
   const details = [node.kind];
-  if ('name' in node && node.name && node.name !== getNodePrimaryName(node)) {
+  if ('name' in node && node.name && !getNodePrimaryName(node).includes(node.name)) {
     details.push(node.name);
   }
   if ('mediaType' in node && node.mediaType) {

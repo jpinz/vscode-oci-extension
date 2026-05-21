@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { METADATA_FILENAME } from './constants';
 
 type JsonObject = Record<string, unknown>;
 
@@ -240,13 +241,13 @@ function getHumanReadableName(node: LayoutNode): string {
   }
 
   if (node.kind === 'image-index') {
-    const imageName = node.mediaType === 'application/vnd.oci.image.index.v1+json'
-      && node.annotations
-      ? node.annotations['io.containerd.image.name']
+    const refName = node.annotations
+      ? node.annotations['org.opencontainers.image.ref.name']
+        || node.annotations['io.containerd.image.name']
       : null;
 
-    if (imageName) {
-      return imageName;
+    if (refName) {
+      return node.name === 'index.json' ? `index.json • ${refName}` : refName;
     }
 
     return node.name === 'index.json' ? node.name : 'image index';
@@ -406,6 +407,20 @@ export function parseLayout(rootPath: string): ParsedLayout {
     const childKey = createDescriptorNode(rootPath, descriptor, 'manifest', nodesByKey, traversalStack);
     indexNode.children.push({ relation: 'manifest', key: childKey });
   });
+
+  const imageNames = topLevelDescriptors
+    .map((d) => d.annotations && d.annotations['org.opencontainers.image.ref.name'])
+    .filter((name): name is string => Boolean(name));
+  const uniqueNames = [...new Set(imageNames)];
+  if (uniqueNames.length > 0) {
+    indexNode.annotations = { 'org.opencontainers.image.ref.name': uniqueNames.join(', ') };
+  } else {
+    const metadataPath = path.join(rootPath, METADATA_FILENAME);
+    const metadataJson = pathHasType(metadataPath, 'isFile') ? safeReadJson(metadataPath) : null;
+    if (metadataJson && typeof metadataJson.reference === 'string') {
+      indexNode.annotations = { 'org.opencontainers.image.ref.name': metadataJson.reference };
+    }
+  }
 
   const collectDescendantKeys = (key: string, visited: Set<string>): void => {
     const node = nodesByKey.get(key);

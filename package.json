@@ -17,7 +17,8 @@
     "explorer"
   ],
   "activationEvents": [
-    "onCustomEditor:ociExplorer.blobViewer"
+    "onCustomEditor:ociExplorer.blobViewer",
+    "onView:ociExplorer.dockerImages"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -37,14 +38,45 @@
       {
         "command": "ociExplorer.openRawFile",
         "title": "Open OCI File"
+      },
+      {
+        "command": "ociExplorer.docker.refresh",
+        "title": "Refresh Docker Images",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ociExplorer.docker.openAsOciLayout",
+        "title": "Open as OCI Layout",
+        "icon": "$(folder-opened)"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ociExplorer",
+          "title": "OCI Explorer",
+          "icon": "media/oci-layout.svg"
+        }
+      ]
+    },
     "views": {
-      "explorer": [
+      "ociExplorer": [
         {
           "id": "ociExplorer.layout",
           "name": "OCI Layout Explorer",
-          "icon": "media/oci-layout.svg"
+          "when": "!ociExplorer.containerToolsActive"
+        },
+        {
+          "id": "ociExplorer.dockerImages",
+          "name": "Docker Images",
+          "when": "!ociExplorer.containerToolsActive"
+        }
+      ],
+      "containersView": [
+        {
+          "id": "ociExplorer.layout.integrated",
+          "name": "OCI Layout Explorer",
+          "when": "ociExplorer.containerToolsActive"
         }
       ]
     },
@@ -77,15 +109,52 @@
       "view/title": [
         {
           "command": "ociExplorer.openLayout",
-          "when": "view == ociExplorer.layout",
+          "when": "view == ociExplorer.layout || view == ociExplorer.layout.integrated",
           "group": "navigation"
         },
         {
           "command": "ociExplorer.refresh",
-          "when": "view == ociExplorer.layout",
+          "when": "view == ociExplorer.layout || view == ociExplorer.layout.integrated",
           "group": "navigation@1"
+        },
+        {
+          "command": "ociExplorer.docker.refresh",
+          "when": "view == ociExplorer.dockerImages",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "ociExplorer.docker.openAsOciLayout",
+          "when": "view == ociExplorer.dockerImages && viewItem == dockerImage",
+          "group": "inline"
+        },
+        {
+          "command": "ociExplorer.docker.openAsOciLayout",
+          "when": "view == ociExplorer.dockerImages && viewItem == dockerImage",
+          "group": "navigation"
+        },
+        {
+          "command": "ociExplorer.docker.openAsOciLayout",
+          "when": "view == vscode-containers.views.images && viewItem == image",
+          "group": "images_2_general@6"
         }
       ]
+    },
+    "configuration": {
+      "title": "OCI Layout Explorer",
+      "properties": {
+        "ociExplorer.docker.socketPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to Docker daemon socket. Leave empty to use DOCKER_HOST environment variable or the platform default."
+        },
+        "ociExplorer.docker.exportPath": {
+          "type": "string",
+          "default": "",
+          "description": "Directory for exported OCI layouts. Leave empty to use a temporary directory."
+        }
+      }
     }
   },
   "scripts": {
