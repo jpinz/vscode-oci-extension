@@ -73,6 +73,14 @@ function safeReadJson(filePath: string): SafeJson {
   }
 }
 
+function isJsonMediaType(mediaType: string | undefined | null): boolean {
+  if (!mediaType) {
+    return true;
+  }
+  const lower = mediaType.toLowerCase();
+  return lower.endsWith('+json') || lower.includes('json');
+}
+
 export function digestToPath(rootPath: string, digest: string | undefined): string | null {
   if (!digest || typeof digest !== 'string' || !digest.includes(':')) {
     return null;
@@ -301,7 +309,9 @@ function createDescriptorNode(
 
   const filePath = digestToPath(rootPath, digest);
   const exists = Boolean(filePath && fs.existsSync(filePath));
-  const json = exists && filePath ? safeReadJson(filePath) : null;
+  const json = exists && filePath && isJsonMediaType(descriptor.mediaType)
+    ? safeReadJson(filePath)
+    : null;
   const node: LayoutNode = {
     key,
     name: relationLabel,
