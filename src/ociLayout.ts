@@ -409,7 +409,10 @@ export function parseLayout(rootPath: string): ParsedLayout {
   });
 
   const imageNames = topLevelDescriptors
-    .map((d) => d.annotations && d.annotations['org.opencontainers.image.ref.name'])
+    .map((d) => d.annotations && (
+      d.annotations['io.containerd.image.name']
+      || d.annotations['org.opencontainers.image.ref.name']
+    ))
     .filter((name): name is string => Boolean(name));
   const uniqueNames = [...new Set(imageNames)];
   if (uniqueNames.length > 0) {
