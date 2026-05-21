@@ -19,6 +19,12 @@ interface ExportImageOptions {
   source?: 'docker-daemon' | 'registry';
 }
 
+interface ParsedRegistryReference {
+  registry: string;
+  repository: string;
+  referenceSuffix: string;
+}
+
 function writeExportMetadata(
   outputDir: string,
   reference: string,
@@ -108,9 +114,89 @@ function asTaggedLayoutRef(layoutPath: string, tag: string): string {
   return `${layoutPath}:${tag}`;
 }
 
+function hasExplicitRegistry(firstPathPart: string): boolean {
+  return firstPathPart.includes('.') || firstPathPart.includes(':') || firstPathPart === 'localhost';
+}
+
+function parseReference(reference: string): { name: string; referenceSuffix: string } {
+  const digestIndex = reference.indexOf('@');
+  if (digestIndex >= 0) {
+    return {
+      name: reference.slice(0, digestIndex),
+      referenceSuffix: reference.slice(digestIndex)
+    };
+  }
+
+  const lastSlash = reference.lastIndexOf('/');
+  const lastColon = reference.lastIndexOf(':');
+  if (lastColon > lastSlash) {
+    return {
+      name: reference.slice(0, lastColon),
+      referenceSuffix: reference.slice(lastColon)
+    };
+  }
+
+  return { name: reference, referenceSuffix: '' };
+}
+
+function normalizeRegistryReference(reference: string): ParsedRegistryReference {
+  const { name, referenceSuffix } = parseReference(reference);
+  const nameParts = name.split('/').filter(Boolean);
+
+  if (nameParts.length === 0) {
+    throw new Error(`Invalid image reference: ${reference}`);
+  }
+
+  if (hasExplicitRegistry(nameParts[0])) {
+    return {
+      registry: nameParts[0],
+      repository: nameParts.slice(1).join('/'),
+      referenceSuffix
+    };
+  }
+
+  if (nameParts.length === 1) {
+    return {
+      registry: 'docker.io',
+      repository: `library/${nameParts[0]}`,
+      referenceSuffix
+    };
+  }
+
+  return {
+    registry: 'docker.io',
+    repository: nameParts.join('/'),
+    referenceSuffix
+  };
+}
+
+function toNormalizedRegistryReference(reference: string): string {
+  const parsed = normalizeRegistryReference(reference);
+  return `${parsed.registry}/${parsed.repository}${parsed.referenceSuffix}`;
+}
+
+async function resolveLocalImagePlatform(reference: string): Promise<string | null> {
+  try {
+    const result = await execFileAsync('docker', [
+      'image',
+      'inspect',
+      '--format',
+      '{{.Os}}/{{.Architecture}}{{if .Variant}}/{{.Variant}}{{end}}',
+      reference
+    ]);
+
+    const platform = result.stdout.trim();
+    return platform.length > 0 ? platform : null;
+  } catch {
+    return null;
+  }
+}
+
 async function convertArchiveToOciLayout(
   archivePath: string,
-  outputDir: string
+  outputDir: string,
+  sourceTag: string,
+  destinationTag: string
 ): Promise<void> {
   outputChannel.appendLine('Converting archive to OCI layout with oras…');
   outputChannel.show(true);
@@ -118,9 +204,9 @@ async function convertArchiveToOciLayout(
   await spawnWithOutput('oras', [
     'cp',
     '--from-oci-layout',
-    asTaggedLayoutRef(archivePath, 'latest'),
+    asTaggedLayoutRef(archivePath, sourceTag),
     '--to-oci-layout',
-    asTaggedLayoutRef(outputDir, 'latest')
+    asTaggedLayoutRef(outputDir, destinationTag)
   ]);
 }
 
@@ -133,11 +219,27 @@ async function exportWithDockerSave(
 
   try {
     const tarPath = path.join(tempDir, 'image.tar');
+    const referenceTag = getReferenceTag(reference) ?? 'latest';
+    const localPlatform = await resolveLocalImagePlatform(reference);
 
     outputChannel.appendLine(`Saving ${reference} with docker save…`);
     outputChannel.show(true);
     await spawnWithOutput('docker', ['save', reference, '-o', tarPath]);
-    await convertArchiveToOciLayout(tarPath, outputDir);
+
+    try {
+      await convertArchiveToOciLayout(tarPath, outputDir, referenceTag, referenceTag);
+    } catch (error) {
+      if (!localPlatform) {
+        throw error;
+      }
+
+      outputChannel.appendLine(
+        `Multi-platform conversion failed; retrying with concrete platform ${localPlatform}…`
+      );
+      await spawnWithOutput('docker', ['save', '--platform', localPlatform, reference, '-o', tarPath]);
+      await convertArchiveToOciLayout(tarPath, outputDir, referenceTag, referenceTag);
+    }
+
     writeExportMetadata(outputDir, reference, source, 'oras');
     outputChannel.appendLine('Conversion complete.');
   } finally {
@@ -146,26 +248,25 @@ async function exportWithDockerSave(
 }
 
 async function exportRegistryDirect(reference: string, outputDir: string): Promise<void> {
-  outputChannel.appendLine(`Copying ${reference} directly from registry with oras…`);
+  const registryReference = toNormalizedRegistryReference(reference);
+  if (registryReference !== reference) {
+    outputChannel.appendLine(`Normalized registry reference: ${reference} -> ${registryReference}`);
+  }
+
+  const destinationTag = getReferenceTag(registryReference) ?? 'latest';
+  outputChannel.appendLine(`Copying ${registryReference} directly from registry with oras…`);
   outputChannel.show(true);
 
-  const destinationTag = getReferenceTag(reference) ?? 'latest';
   await spawnWithOutput('oras', [
     'cp',
     '--recursive',
-    reference,
+    registryReference,
     '--to-oci-layout',
     asTaggedLayoutRef(outputDir, destinationTag)
   ]);
 
   writeExportMetadata(outputDir, reference, 'registry', 'oras');
   outputChannel.appendLine('Direct registry export complete.');
-}
-
-async function pullImage(reference: string): Promise<void> {
-  outputChannel.appendLine(`Pulling ${reference} from registry with docker…`);
-  outputChannel.show(true);
-  await spawnWithOutput('docker', ['pull', reference]);
 }
 
 export async function exportImageToOciLayout(reference: string, options?: ExportImageOptions): Promise<string> {
@@ -194,22 +295,15 @@ export async function exportImageToOciLayout(reference: string, options?: Export
     if (!(await isCommandAvailable('oras'))) {
       throw new Error('oras is required for OCI layout export.');
     }
-    try {
-      await exportRegistryDirect(reference, outputDir);
-      return outputDir;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      outputChannel.appendLine(`Direct registry copy failed: ${message}`);
-      outputChannel.appendLine('Falling back to docker save + oras conversion path.');
-    }
+    outputChannel.appendLine('Using registry export flow: oras cp directly to OCI layout.');
+    await exportRegistryDirect(reference, outputDir);
+    return outputDir;
   }
 
-  if (source === 'registry') {
-    await pullImage(reference);
-  }
   if (!(await isCommandAvailable('oras'))) {
     throw new Error('oras is required for OCI layout export.');
   }
+
   await exportWithDockerSave(reference, outputDir, source);
 
   return outputDir;

@@ -2,6 +2,13 @@
 
 All notable changes to the "oci-layout-explorer" extension will be documented in this file.
 
+## [1.0.5] - 2026-05-21
+
+- Switched remote registry export to always use direct `oras cp --recursive ... --to-oci-layout ...`, removing the Docker pull/save fallback for registry mode.
+- Added shorthand registry-reference normalization for registry exports (for example, `nginx:latest` -> `docker.io/library/nginx:latest`).
+- Kept Docker-daemon exports on `docker save` + `oras cp --from-oci-layout ... --to-oci-layout ...`, with multi-platform export attempted first and concrete-platform retry when required.
+- Updated README export flow and requirements to match the current behavior.
+
 ## [1.0.4] - 2026-05-21
 
 - Removed `skopeo` from the export pipeline to eliminate tool-specific copy failures and flag compatibility issues.
