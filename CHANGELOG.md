@@ -2,6 +2,16 @@
 
 All notable changes to the "oci-layout-explorer" extension will be documented in this file.
 
+## [Unreleased]
+
+- Added customizable node labels via the new `ociExplorer.customLabels` setting (match by `mediaType`, `predicateType`, and/or `artifactType` with `*` wildcards). The OCI tree refreshes automatically when the rules change.
+- Added a prerequisite warning entry in the OCI Layout view when `oras` is not installed, plus a new **OCI Explorer: Show OCI Layout Prerequisites** command that opens an in-editor help page.
+- Added an `oci-explorer-blob:` read-only virtual file system; JSON descriptor blobs now open as pretty-printed, read-only documents instead of editable in-place files.
+- Replaced the byte-based `ociExplorer.jsonDetectionMaxBytes` setting with the megabyte-based `ociExplorer.jsonDetectionMaxSizeMB` (default `8`); the same limit also governs pretty-printing in the blob virtual file system.
+- Docker-daemon exports now fall back to pulling the image directly from its registry with `oras cp` if `docker save` or the local layout conversion fails. Conversions also now run `oras cp --recursive` to preserve referrers and attestation graphs.
+- When `ociExplorer.docker.exportPath` is configured, the intermediate `docker save` tar is now cached next to the exported layout (`<image>.tar`) instead of a temp directory.
+- Display labels for OCI node kinds (image index, image manifest, config, layer, blob, layout) now use human-readable forms in tree descriptions and tooltips.
+
 ## [1.0.7] - 2026-05-21
 
 - Removed the custom blob web UI/editor path and standardized OCI file viewing in the native VS Code text editor.

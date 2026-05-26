@@ -23,10 +23,13 @@
 			"request": "launch",
 			"args": [
 				"--extensionDevelopmentPath=${workspaceFolder}",
-				"--extensionTestsPath=${workspaceFolder}/out/test"
+				"--extensionTestsPath=${workspaceFolder}/node_modules/@vscode/test-cli/out/runner.cjs"
 			],
+			"env": {
+				"VSCODE_TEST_OPTIONS": "${workspaceFolder}/.vscode-test.mjs"
+			},
 			"outFiles": [
-				"${workspaceFolder}/out/test/**/*.js"
+				"${workspaceFolder}/out/**/*.js"
 			],
 			"preLaunchTask": "npm: compile-tests"
 		}

@@ -1,29 +1,19 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { CONTEXT_UPDATE_DEBOUNCE_MS } from './constants';
+import which from 'which';
+import { CONTEXT_UPDATE_DEBOUNCE_MS, ORAS_COMMAND } from './constants';
+import { compileCustomLabelRules } from './customLabels';
 import { exportImageToOciLayout } from './dockerExport';
 import { listImages } from './docker';
-import { DockerImageNode, DockerImageTreeProvider } from './dockerTree';
+import { DockerImageTreeProvider } from './dockerTree';
 import { LayoutNode, parseLayout } from './ociLayout';
-import { openNodeFile, openNodePreview } from './nodePreview';
+import { getJsonDetectionMaxBytes, OCI_BLOB_SCHEME, OciBlobContentProvider, toOciBlobUri } from './ociBlobContentProvider';
+import { openNodeFile } from './nodePreview';
+import { showPrerequisitesHelp } from './showPrerequisitesHelp';
 import { OciTreeProvider } from './tree';
 
-const DEFAULT_JSON_DETECTION_MAX_BYTES = 8 * 1024 * 1024;
-const JSON_DETECTION_MAX_BYTES_SETTING = 'jsonDetectionMaxBytes';
 const OCI_DIGEST_PATTERN = /\b([A-Za-z][A-Za-z0-9+._-]*):([a-f0-9]{32,})\b/g;
-
-function getJsonDetectionMaxBytes(): number {
-  const configured = vscode.workspace
-    .getConfiguration('ociExplorer')
-    .get<number>(JSON_DETECTION_MAX_BYTES_SETTING, DEFAULT_JSON_DETECTION_MAX_BYTES);
-
-  if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
-    return DEFAULT_JSON_DETECTION_MAX_BYTES;
-  }
-
-  return Math.floor(configured);
-}
 
 function isLikelyOciDescriptorPath(fsPath: string): boolean {
   const normalized = fsPath.replace(/\\/g, '/');
@@ -54,7 +44,7 @@ function isJsonDocumentContent(text: string): boolean {
 }
 
 async function ensureJsonLanguageForOciDocument(document: vscode.TextDocument): Promise<void> {
-  if (document.uri.scheme !== 'file') {
+  if (document.uri.scheme !== 'file' && document.uri.scheme !== OCI_BLOB_SCHEME) {
     return;
   }
 
@@ -62,13 +52,15 @@ async function ensureJsonLanguageForOciDocument(document: vscode.TextDocument): 
     return;
   }
 
-  try {
-    const stat = await vscode.workspace.fs.stat(document.uri);
-    if (stat.size > getJsonDetectionMaxBytes()) {
+  if (document.uri.scheme === 'file') {
+    try {
+      const stat = await vscode.workspace.fs.stat(document.uri);
+      if (stat.size > getJsonDetectionMaxBytes()) {
+        return;
+      }
+    } catch {
       return;
     }
-  } catch {
-    return;
   }
 
   if (!isJsonDocumentContent(document.getText())) {
@@ -107,35 +99,6 @@ function digestToBlobPath(rootPath: string, digest: string): string | null {
   return path.join(rootPath, 'blobs', algorithm, encoded);
 }
 
-function createOciDescriptorDocumentLinks(document: vscode.TextDocument): vscode.DocumentLink[] {
-  const layoutRoot = findLayoutRoot(document.uri.fsPath);
-  if (!layoutRoot) {
-    return [];
-  }
-
-  const text = document.getText();
-  const links: vscode.DocumentLink[] = [];
-  const pattern = new RegExp(OCI_DIGEST_PATTERN);
-  let match = pattern.exec(text);
-
-  while (match) {
-    const digest = `${match[1]}:${match[2]}`;
-    const blobPath = digestToBlobPath(layoutRoot, digest);
-
-    if (blobPath && fs.existsSync(blobPath) && fs.statSync(blobPath).isFile()) {
-      const start = document.positionAt(match.index);
-      const end = document.positionAt(match.index + digest.length);
-      const link = new vscode.DocumentLink(new vscode.Range(start, end), vscode.Uri.file(blobPath));
-      link.tooltip = `Open ${digest}`;
-      links.push(link);
-    }
-
-    match = pattern.exec(text);
-  }
-
-  return links;
-}
-
 function findDigestAtPosition(document: vscode.TextDocument, position: vscode.Position): {
   digest: string;
   range: vscode.Range;
@@ -161,64 +124,104 @@ function findDigestAtPosition(document: vscode.TextDocument, position: vscode.Po
   return null;
 }
 
-function readDescriptorSummary(blobPath: string, maxBytes: number): {
+interface OciDescriptor {
+  digest?: string;
   mediaType?: string;
   artifactType?: string;
-  predicateType?: string;
-  kind?: string;
-  manifests?: number;
-  layers?: number;
-} | null {
+  size?: number;
+  platform?: {
+    os?: string;
+    architecture?: string;
+    variant?: string;
+  };
+  annotations?: Record<string, string>;
+}
+
+function findDescriptorForDigest(document: vscode.TextDocument, digest: string): OciDescriptor | null {
+  const text = document.getText();
+  if (text.length > getJsonDetectionMaxBytes()) {
+    return null;
+  }
+
+  let root: unknown;
   try {
-    const stat = fs.statSync(blobPath);
-    if (!stat.isFile() || stat.size > maxBytes) {
-      return null;
-    }
-
-    const content = fs.readFileSync(blobPath, 'utf8');
-    if (!isJsonDocumentContent(content)) {
-      return null;
-    }
-
-    const parsed = JSON.parse(content) as Record<string, unknown>;
-    const summary: {
-      mediaType?: string;
-      artifactType?: string;
-      predicateType?: string;
-      kind?: string;
-      manifests?: number;
-      layers?: number;
-    } = {};
-
-    if (typeof parsed.mediaType === 'string') {
-      summary.mediaType = parsed.mediaType;
-    }
-    if (typeof parsed.artifactType === 'string') {
-      summary.artifactType = parsed.artifactType;
-    }
-    if (summary.mediaType === 'application/vnd.in-toto+json' && typeof parsed.predicateType === 'string') {
-      summary.predicateType = parsed.predicateType;
-    }
-
-    if (Array.isArray(parsed.manifests)) {
-      summary.kind = 'image index';
-      summary.manifests = parsed.manifests.length;
-    } else if (Array.isArray(parsed.layers) || (parsed.config && typeof parsed.config === 'object')) {
-      summary.kind = 'image manifest';
-      if (Array.isArray(parsed.layers)) {
-        summary.layers = parsed.layers.length;
-      }
-    } else if (typeof parsed.rootfs === 'object' && parsed.rootfs !== null) {
-      summary.kind = 'image config';
-    }
-
-    return summary;
+    root = JSON.parse(text);
   } catch {
     return null;
   }
+
+  const stack: unknown[] = [root];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current || typeof current !== 'object') {
+      continue;
+    }
+
+    if (Array.isArray(current)) {
+      for (const item of current) {
+        stack.push(item);
+      }
+      continue;
+    }
+
+    const obj = current as Record<string, unknown>;
+    if (obj.digest === digest) {
+      return obj as OciDescriptor;
+    }
+
+    for (const value of Object.values(obj)) {
+      if (value && typeof value === 'object') {
+        stack.push(value);
+      }
+    }
+  }
+
+  return null;
 }
 
-function provideOciDigestHover(document: vscode.TextDocument, position: vscode.Position): vscode.Hover | null {
+function mediaTypeToKind(mediaType?: string): string | null {
+  if (!mediaType) {
+    return null;
+  }
+
+  const mt = mediaType.toLowerCase();
+  if (mt.includes('image.index') || mt.includes('manifest.list')) {
+    return 'image index';
+  }
+  if (mt.includes('image.manifest')) {
+    return 'image manifest';
+  }
+  if (mt.includes('image.config')) {
+    return 'image config';
+  }
+  if (mt.includes('image.layer') || mt.includes('rootfs.diff')) {
+    return 'image layer';
+  }
+  if (mt === 'application/vnd.in-toto+json') {
+    return 'in-toto attestation';
+  }
+  return null;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex++;
+  }
+  return `${value.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function provideOciDigestDefinition(
+  document: vscode.TextDocument,
+  position: vscode.Position
+): vscode.Location | null {
   if (!isLikelyOciDescriptorPath(document.uri.fsPath)) {
     return null;
   }
@@ -234,44 +237,73 @@ function provideOciDigestHover(document: vscode.TextDocument, position: vscode.P
   }
 
   const blobPath = digestToBlobPath(layoutRoot, match.digest);
-  if (!blobPath || !fs.existsSync(blobPath)) {
+  if (!blobPath || !fs.existsSync(blobPath) || !fs.statSync(blobPath).isFile()) {
     return null;
   }
 
-  const stat = fs.statSync(blobPath);
-  if (!stat.isFile()) {
+  return new vscode.Location(toOciBlobUri(blobPath), new vscode.Position(0, 0));
+}
+
+function provideOciDigestHover(document: vscode.TextDocument, position: vscode.Position): vscode.Hover | null {
+  if (!isLikelyOciDescriptorPath(document.uri.fsPath)) {
     return null;
   }
 
-  const markdown = new vscode.MarkdownString(undefined, true);
-  markdown.appendMarkdown('**OCI Blob Preview**\n\n');
-  markdown.appendCodeblock(match.digest, 'text');
-  markdown.appendMarkdown(`\nPath: ${blobPath.replace(/\\/g, '/')}  \n`);
-  markdown.appendMarkdown(`Size: ${stat.size.toLocaleString()} bytes\n`);
-
-  const summary = readDescriptorSummary(blobPath, getJsonDetectionMaxBytes());
-  if (summary) {
-    if (summary.kind) {
-      markdown.appendMarkdown(`\nKind: ${summary.kind}  \n`);
-    }
-    if (summary.mediaType) {
-      markdown.appendMarkdown(`Media Type: \`${summary.mediaType}\`  \n`);
-    }
-    if (summary.artifactType) {
-      markdown.appendMarkdown(`Artifact Type: \`${summary.artifactType}\`  \n`);
-    }
-    if (summary.predicateType) {
-      markdown.appendMarkdown(`Predicate Type: \`${summary.predicateType}\`  \n`);
-    }
-    if (typeof summary.manifests === 'number') {
-      markdown.appendMarkdown(`Manifests: ${summary.manifests}  \n`);
-    }
-    if (typeof summary.layers === 'number') {
-      markdown.appendMarkdown(`Layers: ${summary.layers}  \n`);
-    }
+  const match = findDigestAtPosition(document, position);
+  if (!match) {
+    return null;
   }
 
-  markdown.appendMarkdown('\nCtrl/Cmd-click to open this blob.');
+  const layoutRoot = findLayoutRoot(document.uri.fsPath);
+  if (!layoutRoot) {
+    return null;
+  }  const blobPath = digestToBlobPath(layoutRoot, match.digest);
+  const blobExists = blobPath !== null && fs.existsSync(blobPath) && fs.statSync(blobPath).isFile();
+
+  const descriptor = findDescriptorForDigest(document, match.digest);
+
+  const lines: string[] = [`**${vscode.l10n.t('OCI Descriptor')}**`, ''];
+
+  const kind = mediaTypeToKind(descriptor?.mediaType);
+  if (kind) {
+    lines.push(`- **${vscode.l10n.t('Kind')}**: ${kind}`);
+  }
+  if (descriptor?.mediaType) {
+    lines.push(`- **${vscode.l10n.t('Media Type')}**: \`${descriptor.mediaType}\``);
+  }
+  if (descriptor?.artifactType) {
+    lines.push(`- **${vscode.l10n.t('Artifact Type')}**: \`${descriptor.artifactType}\``);
+  }
+  if (descriptor?.mediaType?.toLowerCase() === 'application/vnd.in-toto+json') {
+    const predicateType = descriptor.annotations?.['in-toto.io/predicate-type'];
+    if (predicateType) {
+      lines.push(`- **${vscode.l10n.t('Predicate Type')}**: \`${predicateType}\``);
+    }
+  }
+  if (typeof descriptor?.size === 'number') {
+    lines.push(`- **${vscode.l10n.t('Size')}**: ${formatBytes(descriptor.size)}`);
+  }
+  if (descriptor?.platform) {
+    const { os, architecture, variant } = descriptor.platform;
+    const parts = [os, architecture, variant].filter(Boolean).join('/');
+    if (parts) {
+      lines.push(`- **${vscode.l10n.t('Platform')}**: \`${parts}\``);
+    }
+  }
+  lines.push(`- **${vscode.l10n.t('Digest')}**: \`${match.digest}\``);
+
+  if (blobExists && blobPath) {
+    const targetUri = toOciBlobUri(blobPath);
+    const openArgs = encodeURIComponent(JSON.stringify([targetUri.toString()]));
+    lines.push('', `[${vscode.l10n.t('Open blob')}](command:vscode.open?${openArgs})`);
+  } else {
+    lines.push('', `_${vscode.l10n.t('Target blob not found in the layout.')}_`);
+  }
+
+  const markdown = new vscode.MarkdownString(lines.join('\n'));
+  markdown.isTrusted = { enabledCommands: ['vscode.open'] };
+  markdown.supportHtml = false;
+
   return new vscode.Hover(markdown, match.range);
 }
 
@@ -350,7 +382,12 @@ async function promptForRegistryReference(): Promise<string | null> {
   return value?.trim() || null;
 }
 
-export function activate(context: vscode.ExtensionContext): void {
+export interface OciExplorerApi {
+  readonly containerToolsActive: boolean;
+  readonly layoutViewId: string;
+}
+
+export function activate(context: vscode.ExtensionContext): OciExplorerApi {
   const containerToolsActive = vscode.extensions.getExtension('ms-azuretools.vscode-containers') !== undefined;
   void vscode.commands.executeCommand('setContext', 'ociExplorer.containerToolsActive', containerToolsActive);
 
@@ -406,6 +443,21 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const layoutViewId = containerToolsActive ? 'ociExplorer.layout.integrated' : 'ociExplorer.layout';
 
+  const loadCustomLabelRules = () => compileCustomLabelRules(
+    vscode.workspace.getConfiguration('ociExplorer').get('customLabels', [])
+  );
+
+  const checkOrasAvailability = async (): Promise<void> => {
+    try {
+      const resolved = await which(ORAS_COMMAND, { nothrow: true });
+      treeProvider.setOrasMissing(!resolved);
+    } catch {
+      treeProvider.setOrasMissing(true);
+    }
+  };
+
+  void checkOrasAvailability();
+
   const refreshFromPath = async (rootPath: string | undefined): Promise<void> => {
     if (!rootPath) {
       treeProvider.setLayout(null);
@@ -417,7 +469,7 @@ export function activate(context: vscode.ExtensionContext): void {
     try {
       const layout = await vscode.window.withProgress(
         { location: { viewId: layoutViewId } },
-        async () => parseLayout(rootPath)
+        async () => parseLayout(rootPath, loadCustomLabelRules())
       );
       treeProvider.setLayout(layout);
       await context.workspaceState.update('ociExplorer.rootPath', rootPath);
@@ -454,29 +506,33 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     treeView,
     ...contextWatchers,
-    vscode.languages.registerDocumentLinkProvider(
-      { scheme: 'file' },
-      {
-        provideDocumentLinks: (document) => {
-          if (!isLikelyOciDescriptorPath(document.uri.fsPath)) {
-            return [];
-          }
-
-          return createOciDescriptorDocumentLinks(document);
-        }
-      }
-    ),
+    vscode.workspace.registerTextDocumentContentProvider(OCI_BLOB_SCHEME, new OciBlobContentProvider()),
     vscode.languages.registerHoverProvider(
-      { scheme: 'file' },
+      [{ scheme: 'file' }, { scheme: OCI_BLOB_SCHEME }],
       {
         provideHover: (document, position) => provideOciDigestHover(document, position)
+      }
+    ),
+    vscode.languages.registerDefinitionProvider(
+      [{ scheme: 'file' }, { scheme: OCI_BLOB_SCHEME }],
+      {
+        provideDefinition: (document, position) => provideOciDigestDefinition(document, position)
       }
     ),
     vscode.workspace.onDidOpenTextDocument((document) => {
       void ensureJsonLanguageForOciDocument(document);
     }),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration('ociExplorer.customLabels')) {
+        const rootPath = context.workspaceState.get<string>('ociExplorer.rootPath');
+        if (rootPath) {
+          void refreshFromPath(rootPath);
+        }
+      }
+    }),
     { dispose: () => contextUpdateTimer && clearTimeout(contextUpdateTimer) },
     vscode.workspace.onDidChangeWorkspaceFolders(scheduleLayoutFolderContextUpdate),
+    vscode.commands.registerCommand('ociExplorer.showPrerequisitesHelp', () => showPrerequisitesHelp(context)),
     vscode.commands.registerCommand('ociExplorer.openLayout', async (resource?: vscode.Uri) => {
       const rootPath = resource && typeof resource.fsPath === 'string'
         ? resource.fsPath
@@ -520,6 +576,7 @@ export function activate(context: vscode.ExtensionContext): void {
         );
 
         await refreshFromPath(outputDir);
+        void checkOrasAvailability();
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         void vscode.window.showErrorMessage(`Explore Image failed: ${message}`);
@@ -537,12 +594,6 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('ociExplorer.openRawFile', async (node?: LayoutNode) => {
       if (node && node.filePath) {
         await openNodeFile(node);
-      }
-    }),
-    treeView.onDidChangeSelection(async (event) => {
-      const [node] = event.selection;
-      if (node && 'filePath' in node && node.filePath) {
-        await openNodePreview(node);
       }
     })
   );
@@ -604,6 +655,8 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     })
   );
+
+  return { containerToolsActive, layoutViewId };
 }
 
 export function deactivate(): void {}

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { LayoutNode, ParsedLayout } from './ociLayout';
+import { getKindDisplayLabel, LayoutNode, ParsedLayout } from './ociLayout';
 
 export interface EmptyNode {
   key: string;
@@ -9,7 +9,16 @@ export interface EmptyNode {
   filePath: null;
 }
 
-export type TreeNode = LayoutNode | EmptyNode;
+export interface WarningNode {
+  key: string;
+  label: string;
+  kind: 'warning';
+  children: [];
+  filePath: null;
+  commandId?: string;
+}
+
+export type TreeNode = LayoutNode | EmptyNode | WarningNode;
 
 class LayoutTreeItem extends vscode.TreeItem {
   readonly node: TreeNode;
@@ -23,6 +32,20 @@ class LayoutTreeItem extends vscode.TreeItem {
     );
 
     this.node = node;
+
+    if (node.kind === 'warning') {
+      this.contextValue = 'ociPrerequisiteMissing';
+      this.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('problemsWarningIcon.foreground'));
+      const warningNode = node as WarningNode;
+      if (warningNode.commandId) {
+        this.command = {
+          command: warningNode.commandId,
+          title: 'Show OCI Layout Prerequisites'
+        };
+      }
+      return;
+    }
+
     this.contextValue = node.filePath ? 'ociNode' : 'ociInfo';
     this.description = describeNode(node);
     this.tooltip = new vscode.MarkdownString(getTooltip(node));
@@ -43,6 +66,7 @@ export class OciTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
   layout: ParsedLayout | null = null;
   private loading = false;
+  private orasMissing = false;
 
   setLayout(layout: ParsedLayout | null): void {
     this.layout = layout;
@@ -55,6 +79,14 @@ export class OciTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     this.refresh();
   }
 
+  setOrasMissing(missing: boolean): void {
+    if (this.orasMissing === missing) {
+      return;
+    }
+    this.orasMissing = missing;
+    this.refresh();
+  }
+
   refresh(): void {
     this._onDidChangeTreeData.fire(undefined);
   }
@@ -64,35 +96,54 @@ export class OciTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   }
 
   getChildren(element?: TreeNode): Thenable<TreeNode[]> {
+    if (element) {
+      if (element.kind === 'info' || element.kind === 'warning' || !this.layout) {
+        return Promise.resolve([]);
+      }
+      const layoutNode = element as LayoutNode;
+      const children = layoutNode.children
+        .map((child) => this.layout?.nodesByKey[child.key])
+        .filter((n): n is LayoutNode => Boolean(n));
+      return Promise.resolve(children);
+    }
+
+    const roots: TreeNode[] = [];
+
+    if (this.orasMissing) {
+      roots.push({
+        key: 'prerequisite',
+        label: 'ORAS is required to export images to an OCI layout. Click to learn more.',
+        kind: 'warning',
+        children: [],
+        filePath: null,
+        commandId: 'ociExplorer.showPrerequisitesHelp'
+      });
+    }
+
     if (this.loading) {
-      return Promise.resolve([
-        {
-          key: 'loading',
-          label: '$(loading~spin) Loading layout…',
-          kind: 'info' as const,
-          children: [] as [],
-          filePath: null
-        }
-      ]);
+      roots.push({
+        key: 'loading',
+        label: '$(loading~spin) Loading layout…',
+        kind: 'info' as const,
+        children: [] as [],
+        filePath: null
+      });
+      return Promise.resolve(roots);
     }
 
     if (!this.layout) {
-      return Promise.resolve([
-        {
-          key: 'empty',
-          label: 'Use Explore Image to open a folder or pull/export an image',
-          kind: 'info',
-          children: [],
-          filePath: null
-        }
-      ]);
+      roots.push({
+        key: 'empty',
+        label: 'Use Explore Image to open a folder or pull/export an image',
+        kind: 'info',
+        children: [],
+        filePath: null
+      });
+      return Promise.resolve(roots);
     }
 
-    if (!element) {
-      return Promise.resolve(this.layout.roots.map((key) => this.layout!.nodesByKey[key]));
-    }
-
-    return Promise.resolve((element.children || []).map((child) => this.layout!.nodesByKey[child.key]));
+    roots.push(...this.layout.roots.map((key) => this.layout!.nodesByKey[key]));
+    return Promise.resolve(roots);
   }
 
   getParent(element: TreeNode): TreeNode | undefined {
@@ -115,21 +166,26 @@ export class OciTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 }
 
 function describeNode(node: TreeNode): string {
-  const details = [node.kind];
-  if ('name' in node && node.name && !getNodePrimaryName(node).includes(node.name)) {
-    details.push(node.name);
+  if (node.kind === 'info' || node.kind === 'warning') {
+    return '';
   }
-  if ('mediaType' in node && node.mediaType) {
-    details.push(node.mediaType.replace(/^application\/vnd\./, ''));
+
+  const layoutNode = node as LayoutNode;
+  const details: string[] = [getKindDisplayLabel(layoutNode.kind)];
+  if (layoutNode.name && !getNodePrimaryName(layoutNode).includes(layoutNode.name)) {
+    details.push(layoutNode.name);
   }
-  if ('digest' in node && node.digest) {
-    details.push(node.digest.slice(0, 19));
+  if (layoutNode.mediaType) {
+    details.push(layoutNode.mediaType.replace(/^application\/vnd\./, ''));
+  }
+  if (layoutNode.digest) {
+    details.push(layoutNode.digest.slice(0, 19));
   }
   return details.join(' • ');
 }
 
 function getTooltip(node: TreeNode): string {
-  const lines = [`**${node.label}**`, '', `Kind: \`${node.kind}\``];
+  const lines = [`**${node.label}**`, '', `Kind: \`${getKindDisplayLabel(node.kind)}\``];
   if ('mediaType' in node && node.mediaType) {
     lines.push(`Media type: \`${node.mediaType}\``);
   }
