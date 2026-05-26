@@ -21,6 +21,7 @@
     "image",
     "explorer"
   ],
+  "icon": "media/oci-icon-black.png",
   "activationEvents": [
     "onStartupFinished",
     "onView:ociExplorer.dockerImages",
@@ -72,7 +73,7 @@
         {
           "id": "ociExplorer",
           "title": "OCI Explorer",
-          "icon": "media/oci-layout.svg"
+          "icon": "media/oci-icon-black.svg"
         }
       ]
     },

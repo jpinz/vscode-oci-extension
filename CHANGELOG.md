@@ -2,8 +2,9 @@
 
 All notable changes to the "oci-layout-explorer" extension will be documented in this file.
 
-## [Unreleased]
+## [1.0.8] - 2026-05-26
 
+- Switched the extension and activity bar icon to the official Open Container Initiative logo (redistributed from `opencontainers/artwork` under Apache 2.0), and added a `NOTICE.md` with full trademark attribution plus a matching **Trademarks and Notices** section in the README.
 - Added customizable node labels via the new `ociExplorer.customLabels` setting (match by `mediaType`, `predicateType`, and/or `artifactType` with `*` wildcards). The OCI tree refreshes automatically when the rules change.
 - Added a prerequisite warning entry in the OCI Layout view when `oras` is not installed, plus a new **OCI Explorer: Show OCI Layout Prerequisites** command that opens an in-editor help page.
 - Added an `oci-explorer-blob:` read-only virtual file system; JSON descriptor blobs now open as pretty-printed, read-only documents instead of editable in-place files.

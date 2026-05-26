@@ -18,16 +18,28 @@
 			"preLaunchTask": "${defaultBuildTask}"
 		},
 		{
-			"name": "Extension Tests",
+			"name": "Extension Tests (standalone)",
 			"type": "extensionHost",
 			"request": "launch",
 			"args": [
 				"--extensionDevelopmentPath=${workspaceFolder}",
-				"--extensionTestsPath=${workspaceFolder}/node_modules/@vscode/test-cli/out/runner.cjs"
+				"--extensionTestsPath=${workspaceFolder}/out/test/runIndex",
+				"--disable-extension",
+				"ms-azuretools.vscode-containers"
 			],
-			"env": {
-				"VSCODE_TEST_OPTIONS": "${workspaceFolder}/.vscode-test.mjs"
-			},
+			"outFiles": [
+				"${workspaceFolder}/out/**/*.js"
+			],
+			"preLaunchTask": "npm: compile-tests"
+		},
+		{
+			"name": "Extension Tests (with Container Tools)",
+			"type": "extensionHost",
+			"request": "launch",
+			"args": [
+				"--extensionDevelopmentPath=${workspaceFolder}",
+				"--extensionTestsPath=${workspaceFolder}/out/test/runIndex"
+			],
 			"outFiles": [
 				"${workspaceFolder}/out/**/*.js"
 			],

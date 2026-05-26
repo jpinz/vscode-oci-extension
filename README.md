@@ -118,3 +118,15 @@ npm run test:vscode
 # Production bundle
 npm run package
 ```
+
+## Trademarks and Notices
+
+The activity bar icon is the official Open Container Initiative&trade; logo,
+redistributed verbatim from [opencontainers/artwork](https://github.com/opencontainers/artwork)
+under the Apache License 2.0. OCI&trade;, Open Container Initiative&trade;,
+and the OCI logo are trademarks of The Linux Foundation&reg;. This extension
+is an independent community project and is not produced, endorsed, or
+sponsored by The Linux Foundation or the Open Container Initiative. See
+[NOTICE.md](NOTICE.md) for full attribution and trademark information, and
+the [Linux Foundation Trademark Usage](https://www.linuxfoundation.org/legal/trademark-usage)
+page for the governing policy.
