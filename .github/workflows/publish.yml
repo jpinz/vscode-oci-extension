@@ -5,6 +5,9 @@ on:
     types:
       - created
 
+permissions:
+  contents: write
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -16,6 +19,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22.x
+          cache: npm
 
       - name: Install dependencies
         run: npm ci
@@ -25,6 +29,7 @@ jobs:
           VERSION="${TAG_NAME#v}"
           echo "Setting package.json version to ${VERSION}"
           npm version "${VERSION}" --no-git-tag-version --allow-same-version
+          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
         env:
           TAG_NAME: ${{ github.event.release.tag_name }}
 
@@ -38,12 +43,21 @@ jobs:
         run: npm run compile-tests
 
       - name: Run unit tests
-        run: npm test
+        run: npm run test:unit
 
-      - name: Run VS Code tests
-        run: xvfb-run -a npm run test:vscode
+      - name: Run VS Code integration tests
+        run: xvfb-run -a npm run test:integration
+
+      - name: Package VSIX
+        run: npx --yes @vscode/vsce package --out "oci-layout-explorer-${VERSION}.vsix"
 
       - name: Publish to Marketplace
-        run: npm run deploy
+        run: npx --yes @vscode/vsce publish --packagePath "oci-layout-explorer-${VERSION}.vsix"
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Upload VSIX to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: gh release upload "${TAG_NAME}" "oci-layout-explorer-${VERSION}.vsix" --clobber --repo "${GITHUB_REPOSITORY}"
