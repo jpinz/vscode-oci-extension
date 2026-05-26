@@ -257,7 +257,8 @@ function provideOciDigestHover(document: vscode.TextDocument, position: vscode.P
   const layoutRoot = findLayoutRoot(document.uri.fsPath);
   if (!layoutRoot) {
     return null;
-  }  const blobPath = digestToBlobPath(layoutRoot, match.digest);
+  }
+  const blobPath = digestToBlobPath(layoutRoot, match.digest);
   const blobExists = blobPath !== null && fs.existsSync(blobPath) && fs.statSync(blobPath).isFile();
 
   const descriptor = findDescriptorForDigest(document, match.digest);

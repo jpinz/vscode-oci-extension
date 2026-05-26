@@ -44,7 +44,11 @@ export class OciBlobContentProvider implements vscode.TextDocumentContentProvide
 
     const raw = await fs.readFile(uri.fsPath, 'utf8');
 
-    if (token.isCancellationRequested || stat.size > getJsonDetectionMaxBytes()) {
+    if (token.isCancellationRequested) {
+      return '';
+    }
+
+    if (stat.size > getJsonDetectionMaxBytes()) {
       return raw;
     }
 
