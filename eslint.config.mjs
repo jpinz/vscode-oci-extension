@@ -24,4 +24,22 @@ export default [{
         "no-throw-literal": "warn",
         semi: "warn",
     },
+}, {
+    files: ["src/test/**/*.ts"],
+    languageOptions: {
+        globals: {
+            suite: "readonly",
+            test: "readonly",
+            suiteSetup: "readonly",
+            suiteTeardown: "readonly",
+            setup: "readonly",
+            teardown: "readonly",
+            describe: "readonly",
+            it: "readonly",
+            before: "readonly",
+            after: "readonly",
+            beforeEach: "readonly",
+            afterEach: "readonly",
+        },
+    },
 }];

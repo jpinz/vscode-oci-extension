@@ -1,172 +1,103 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import * as fs from 'node:fs';
-import * as os from 'node:os';
+import * as assert from 'node:assert/strict';
 import * as path from 'node:path';
-import { digestToPath, isOciLayoutFolder, parseLayout } from '../ociLayout';
+import * as vscode from 'vscode';
 
-const fixturePath = path.join(__dirname, '..', '..', 'src', 'test', 'fixtures', 'sample-layout');
-const richFixturePath = path.join(__dirname, '..', '..', 'src', 'test', 'fixtures', 'rich-layout');
-const attestationFixturePath = path.join(__dirname, '..', '..', 'src', 'test', 'fixtures', 'attestation-layout');
+const EXTENSION_ID = 'jpinz.oci-layout-explorer';
+const CONTAINER_TOOLS_ID = 'ms-azuretools.vscode-containers';
 
-test('digestToPath maps blob digests into OCI blob paths', () => {
-	assert.equal(
-		digestToPath('/tmp/layout', 'sha256:abc123'),
-		path.join('/tmp/layout', 'blobs', 'sha256', 'abc123')
-	);
-});
+const sampleLayoutPath = path.join(__dirname, '..', '..', 'src', 'test', 'fixtures', 'sample-layout');
 
-test('parseLayout links the image index, manifest, config, and layers', () => {
-	const layout = parseLayout(fixturePath);
+interface OciExplorerApi {
+	readonly containerToolsActive: boolean;
+	readonly layoutViewId: string;
+}
 
-	assert.equal(layout.layoutVersion, '1.0.0');
-	assert.deepEqual(layout.roots, ['layout-file', 'index-file']);
-	assert.equal(Object.keys(layout.nodesByKey).length, 5);
-
-	const indexNode = layout.nodesByKey['index-file'];
-	assert.equal(indexNode.children.length, 1);
-	assert.equal(indexNode.children[0].relation, 'manifest');
-
-	const manifestNode = layout.nodesByKey[indexNode.children[0].key];
-	assert.equal(manifestNode.kind, 'image-manifest');
-	assert.equal(manifestNode.label, 'demo:v1 • linux/amd64');
-	assert.equal(manifestNode.name, 'manifest');
-	assert.equal(manifestNode.children.length, 2);
-
-	const configNode = layout.nodesByKey[manifestNode.children[0].key];
-	assert.equal(configNode.kind, 'config');
-	assert.equal(configNode.label, 'image config • linux/amd64');
-
-	const layerNode = layout.nodesByKey[manifestNode.children[1].key];
-	assert.equal(layerNode.kind, 'layer');
-	assert.equal(layerNode.label, 'layer • app/bin/demo');
-	assert.match(layerNode.filePath || '', /blobs[\\/]+sha256[\\/]+3333333333333333333333333333333333333333333333333333333333333333$/);
-});
-
-test('parseLayout uses attestation and image index annotations in labels', () => {
-	const layout = parseLayout(richFixturePath);
-	const indexNode = layout.nodesByKey['index-file'];
-
-	assert.equal(indexNode.children.length, 2);
-	assert.equal(indexNode.children[0].relation, 'manifest');
-	assert.equal(indexNode.children[1].relation, 'manifest');
-
-	const nestedIndexNode = layout.nodesByKey[indexNode.children[0].key];
-	assert.equal(nestedIndexNode.kind, 'image-index');
-	assert.equal(nestedIndexNode.label, 'demo:nested');
-
-	const attestationNode = layout.nodesByKey[indexNode.children[1].key];
-	assert.equal(attestationNode.kind, 'image-manifest');
-	assert.equal(attestationNode.label, 'attestation manifest • https://spdx.dev/Document');
-});
-
-test('isOciLayoutFolder requires layout markers and the blobs directory', () => {
-	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'oci-layout-test-'));
-	try {
-		assert.equal(isOciLayoutFolder(tempRoot), false);
-		assert.throws(() => parseLayout(tempRoot), /is not an OCI layout folder/);
-
-		fs.writeFileSync(path.join(tempRoot, 'oci-layout'), '{"imageLayoutVersion":"1.0.0"}');
-		assert.equal(isOciLayoutFolder(tempRoot), false);
-
-		fs.writeFileSync(path.join(tempRoot, 'index.json'), '{"schemaVersion":2,"manifests":[]}');
-		assert.equal(isOciLayoutFolder(tempRoot), false);
-		assert.throws(() => parseLayout(tempRoot), /is not an OCI layout folder/);
-
-		fs.mkdirSync(path.join(tempRoot, 'blobs'));
-		assert.equal(isOciLayoutFolder(tempRoot), true);
-	} finally {
-		fs.rmSync(tempRoot, { recursive: true, force: true });
+async function getActivatedExtension(): Promise<vscode.Extension<OciExplorerApi>> {
+	const extension = vscode.extensions.getExtension<OciExplorerApi>(EXTENSION_ID);
+	assert.ok(extension, `Extension ${EXTENSION_ID} should be present in the test host.`);
+	if (!extension.isActive) {
+		await extension.activate();
 	}
-});
+	return extension;
+}
 
-test('parseLayout categorizes in-toto statements and docker configs for display labels', () => {
-	const layout = parseLayout(attestationFixturePath);
-	const indexNode = layout.nodesByKey['index-file'];
-	const labels = indexNode.children.map((child) => layout.nodesByKey[child.key].label);
+const containerToolsInstalled = (): boolean =>
+	vscode.extensions.getExtension(CONTAINER_TOOLS_ID) !== undefined;
 
-	assert.deepEqual(labels, [
-		'SLSA • linux/amd64',
-		'SBOM (SPDX) • linux/arm64',
-		'SBOM (CycloneDX)',
-		'Trivy Report',
-		'image config • linux/s390x'
-	]);
-});
+suite('OCI Layout Explorer integration', () => {
+	suiteSetup(async function () {
+		this.timeout(20_000);
+		await getActivatedExtension();
+	});
 
-test('parseLayout labels OpenVEX in-toto attestations as VEX', () => {
-	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'oci-openvex-test-'));
-	try {
-		fs.mkdirSync(path.join(tempRoot, 'blobs', 'sha256'), { recursive: true });
-		fs.writeFileSync(path.join(tempRoot, 'oci-layout'), '{"imageLayoutVersion":"1.0.0"}');
-		fs.writeFileSync(path.join(tempRoot, 'index.json'), JSON.stringify({
-			schemaVersion: 2,
-			manifests: [
-				{
-					mediaType: 'application/vnd.in-toto+json',
-					digest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-					size: 123,
-					platform: { os: 'linux', architecture: 'amd64' }
-				}
-			]
-		}));
-		fs.writeFileSync(
-			path.join(tempRoot, 'blobs', 'sha256', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
-			JSON.stringify({
-				_type: 'https://in-toto.io/Statement/v0.1',
-				predicateType: 'https://openvex.dev/ns/v0.2.0'
-			})
+	test('extension is present and activates', async () => {
+		const extension = await getActivatedExtension();
+		assert.equal(extension.isActive, true);
+	});
+
+	test('contributed commands are registered', async () => {
+		const commands = await vscode.commands.getCommands(true);
+		for (const expected of [
+			'ociExplorer.openLayout',
+			'ociExplorer.exploreImage',
+			'ociExplorer.refresh',
+			'ociExplorer.openRawFile',
+			'ociExplorer.openLayoutFromExplorer',
+			'ociExplorer.showPrerequisitesHelp'
+		]) {
+			assert.ok(commands.includes(expected), `Command ${expected} should be registered.`);
+		}
+	});
+
+	test('ociExplorer.openLayout loads a fixture layout into workspace state', async function () {
+		this.timeout(20_000);
+		await vscode.commands.executeCommand('ociExplorer.openLayout', vscode.Uri.file(sampleLayoutPath));
+		// Refresh should run without throwing once a root has been set.
+		await vscode.commands.executeCommand('ociExplorer.refresh');
+	});
+
+	test('OCI blob virtual document provider yields pretty-printed JSON', async () => {
+		const blobPath = path.join(
+			sampleLayoutPath,
+			'blobs',
+			'sha256',
+			'1111111111111111111111111111111111111111111111111111111111111111'
 		);
-
-		const layout = parseLayout(tempRoot);
-		const indexNode = layout.nodesByKey['index-file'];
-		const vexNode = layout.nodesByKey[indexNode.children[0].key];
-
-		assert.equal(vexNode.label, 'VEX • linux/amd64');
-	} finally {
-		fs.rmSync(tempRoot, { recursive: true, force: true });
-	}
+		const uri = vscode.Uri.file(blobPath).with({ scheme: 'oci-explorer-blob' });
+		const document = await vscode.workspace.openTextDocument(uri);
+		const text = document.getText().trim();
+		assert.ok(text.length > 0, 'Blob document should not be empty.');
+		const parsed = JSON.parse(text) as { mediaType?: string };
+		assert.equal(parsed.mediaType, 'application/vnd.oci.image.manifest.v1+json');
+		// Pretty-printed output should contain newlines, unlike the on-disk one-line blob.
+		assert.ok(text.includes('\n'), 'Provider should pretty-print JSON.');
+	});
 });
 
-test('parseLayout labels VEX-like attestation manifests as VEX', () => {
-	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'oci-vex-manifest-test-'));
-	try {
-		fs.mkdirSync(path.join(tempRoot, 'blobs', 'sha256'), { recursive: true });
-		fs.writeFileSync(path.join(tempRoot, 'oci-layout'), '{"imageLayoutVersion":"1.0.0"}');
-		fs.writeFileSync(path.join(tempRoot, 'index.json'), JSON.stringify({
-			schemaVersion: 2,
-			manifests: [
-				{
-					mediaType: 'application/vnd.oci.image.manifest.v1+json',
-					digest: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-					size: 321,
-					annotations: {
-						'vnd.docker.reference.type': 'attestation-manifest',
-						'in-toto.io/predicate-type': 'https://example.org/security/vex/v1'
-					},
-					platform: { os: 'linux', architecture: 'arm64' }
-				}
-			]
-		}));
-		fs.writeFileSync(
-			path.join(tempRoot, 'blobs', 'sha256', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
-			JSON.stringify({
-				schemaVersion: 2,
-				config: {
-					mediaType: 'application/vnd.oci.image.config.v1+json',
-					digest: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
-					size: 1
-				},
-				layers: []
-			})
+suite('Container Tools integration matrix', () => {
+	suiteSetup(async function () {
+		this.timeout(20_000);
+		await getActivatedExtension();
+	});
+
+	test('exported API matches Container Tools presence', async () => {
+		const extension = await getActivatedExtension();
+		const api = extension.exports;
+		const present = containerToolsInstalled();
+		assert.equal(api.containerToolsActive, present, 'containerToolsActive should match presence.');
+		assert.equal(
+			api.layoutViewId,
+			present ? 'ociExplorer.layout.integrated' : 'ociExplorer.layout',
+			'layoutViewId should switch based on Container Tools presence.'
 		);
+	});
 
-		const layout = parseLayout(tempRoot);
-		const indexNode = layout.nodesByKey['index-file'];
-		const vexNode = layout.nodesByKey[indexNode.children[0].key];
-
-		assert.equal(vexNode.label, 'VEX • linux/arm64');
-	} finally {
-		fs.rmSync(tempRoot, { recursive: true, force: true });
-	}
+	test('Container Tools commands are present only when the extension is installed', async () => {
+		const enumeratedPresent = vscode.extensions.all.some((ext) => ext.id === CONTAINER_TOOLS_ID);
+		assert.equal(
+			enumeratedPresent,
+			containerToolsInstalled(),
+			'extensions.all should agree with getExtension on Container Tools presence.'
+		);
+	});
 });

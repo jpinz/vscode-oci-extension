@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { METADATA_FILENAME } from './constants';
+import { METADATA_FILENAME, ORAS_COMMAND } from './constants';
 import { resolveExportDir } from './config/exportPath';
 
 const outputChannel = vscode.window.createOutputChannel('OCI Export');
@@ -201,8 +201,9 @@ async function convertArchiveToOciLayout(
   outputChannel.appendLine('Converting archive to OCI layout with oras…');
   outputChannel.show(true);
 
-  await spawnWithOutput('oras', [
+  await spawnWithOutput(ORAS_COMMAND, [
     'cp',
+    '--recursive',
     '--from-oci-layout',
     asTaggedLayoutRef(archivePath, sourceTag),
     '--to-oci-layout',
@@ -210,25 +211,46 @@ async function convertArchiveToOciLayout(
   ]);
 }
 
-async function exportWithDockerSave(
+async function dockerSaveToTar(reference: string, tarPath: string, platform?: string): Promise<void> {
+  const args = ['save'];
+  if (platform) {
+    args.push('--platform', platform);
+  }
+  args.push(reference, '-o', tarPath);
+
+  outputChannel.appendLine(`Saving ${reference} with docker save…`);
+  outputChannel.show(true);
+  await spawnWithOutput('docker', args);
+}
+
+async function dockerSaveAndConvert(
   reference: string,
   outputDir: string,
-  source: ExportMetadata['source']
+  persistentTarPath?: string
 ): Promise<void> {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oci-export-'));
+  let tarPath: string;
+  let tempDir: string | undefined;
+
+  if (persistentTarPath) {
+    tarPath = persistentTarPath;
+    fs.mkdirSync(path.dirname(tarPath), { recursive: true });
+    if (fs.existsSync(tarPath)) {
+      fs.rmSync(tarPath, { force: true });
+    }
+  } else {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oci-export-'));
+    tarPath = path.join(tempDir, 'image.tar');
+  }
 
   try {
-    const tarPath = path.join(tempDir, 'image.tar');
     const referenceTag = getReferenceTag(reference) ?? 'latest';
-    const localPlatform = await resolveLocalImagePlatform(reference);
 
-    outputChannel.appendLine(`Saving ${reference} with docker save…`);
-    outputChannel.show(true);
-    await spawnWithOutput('docker', ['save', reference, '-o', tarPath]);
+    await dockerSaveToTar(reference, tarPath);
 
     try {
       await convertArchiveToOciLayout(tarPath, outputDir, referenceTag, referenceTag);
     } catch (error) {
+      const localPlatform = await resolveLocalImagePlatform(reference);
       if (!localPlatform) {
         throw error;
       }
@@ -236,37 +258,62 @@ async function exportWithDockerSave(
       outputChannel.appendLine(
         `Multi-platform conversion failed; retrying with concrete platform ${localPlatform}…`
       );
-      await spawnWithOutput('docker', ['save', '--platform', localPlatform, reference, '-o', tarPath]);
+      await dockerSaveToTar(reference, tarPath, localPlatform);
       await convertArchiveToOciLayout(tarPath, outputDir, referenceTag, referenceTag);
     }
-
-    writeExportMetadata(outputDir, reference, source, 'oras');
-    outputChannel.appendLine('Conversion complete.');
   } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    if (tempDir) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   }
 }
 
-async function exportRegistryDirect(reference: string, outputDir: string): Promise<void> {
+async function orasCopyFromRegistry(reference: string, outputDir: string): Promise<void> {
+  fs.mkdirSync(outputDir, { recursive: true });
+
   const registryReference = toNormalizedRegistryReference(reference);
   if (registryReference !== reference) {
     outputChannel.appendLine(`Normalized registry reference: ${reference} -> ${registryReference}`);
   }
 
   const destinationTag = getReferenceTag(registryReference) ?? 'latest';
-  outputChannel.appendLine(`Copying ${registryReference} directly from registry with oras…`);
+  outputChannel.appendLine(`Copying ${registryReference} from registry with oras…`);
   outputChannel.show(true);
 
-  await spawnWithOutput('oras', [
+  await spawnWithOutput(ORAS_COMMAND, [
     'cp',
     '--recursive',
     registryReference,
     '--to-oci-layout',
     asTaggedLayoutRef(outputDir, destinationTag)
   ]);
+}
 
-  writeExportMetadata(outputDir, reference, 'registry', 'oras');
-  outputChannel.appendLine('Direct registry export complete.');
+async function exportFromDaemon(
+  reference: string,
+  outputDir: string,
+  source: ExportMetadata['source'],
+  persistentTarPath?: string
+): Promise<void> {
+  try {
+    await dockerSaveAndConvert(reference, outputDir, persistentTarPath);
+    writeExportMetadata(outputDir, reference, source, 'oras');
+    outputChannel.appendLine('Conversion complete.');
+    return;
+  } catch (saveError) {
+    const message = saveError instanceof Error ? saveError.message : String(saveError);
+    outputChannel.appendLine(
+      `docker save / oras conversion failed (${message}); falling back to pulling ${reference} from its registry…`
+    );
+  }
+
+  if (fs.existsSync(outputDir)) {
+    fs.rmSync(outputDir, { recursive: true, force: true });
+  }
+
+  await orasCopyFromRegistry(reference, outputDir);
+  writeExportMetadata(outputDir, reference, source, 'oras');
+  outputChannel.appendLine('Registry fallback export complete.');
 }
 
 export async function exportImageToOciLayout(reference: string, options?: ExportImageOptions): Promise<string> {
@@ -281,6 +328,10 @@ export async function exportImageToOciLayout(reference: string, options?: Export
     outputDir = path.join(os.tmpdir(), 'oci-layouts', imageDirName);
   }
 
+  if (!(await isCommandAvailable(ORAS_COMMAND))) {
+    throw new Error('oras is required for OCI layout export.');
+  }
+
   outputChannel.show(true);
   if (fs.existsSync(outputDir)) {
     outputChannel.appendLine(`OCI layout target already exists: ${outputDir}`);
@@ -292,19 +343,17 @@ export async function exportImageToOciLayout(reference: string, options?: Export
   outputChannel.appendLine(`Created OCI layout directory: ${outputDir}`);
 
   if (source === 'registry') {
-    if (!(await isCommandAvailable('oras'))) {
-      throw new Error('oras is required for OCI layout export.');
-    }
     outputChannel.appendLine('Using registry export flow: oras cp directly to OCI layout.');
-    await exportRegistryDirect(reference, outputDir);
+    await orasCopyFromRegistry(reference, outputDir);
+    writeExportMetadata(outputDir, reference, 'registry', 'oras');
+    outputChannel.appendLine('Direct registry export complete.');
     return outputDir;
   }
 
-  if (!(await isCommandAvailable('oras'))) {
-    throw new Error('oras is required for OCI layout export.');
-  }
+  const persistentTarPath = configuredDir
+    ? path.join(configuredDir, `${imageDirName}.tar`)
+    : undefined;
 
-  await exportWithDockerSave(reference, outputDir, source);
-
+  await exportFromDaemon(reference, outputDir, source, persistentTarPath);
   return outputDir;
 }

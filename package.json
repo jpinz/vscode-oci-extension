@@ -21,8 +21,11 @@
     "image",
     "explorer"
   ],
+  "icon": "media/oci-icon-black.png",
   "activationEvents": [
-    "onView:ociExplorer.dockerImages"
+    "onStartupFinished",
+    "onView:ociExplorer.dockerImages",
+    "workspaceContains:**/oci-layout"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -58,6 +61,11 @@
         "command": "ociExplorer.docker.openAsOciLayout",
         "title": "Open as OCI Layout",
         "icon": "$(folder-opened)"
+      },
+      {
+        "command": "ociExplorer.showPrerequisitesHelp",
+        "title": "Show OCI Layout Prerequisites",
+        "category": "OCI Explorer"
       }
     ],
     "viewsContainers": {
@@ -65,7 +73,7 @@
         {
           "id": "ociExplorer",
           "title": "OCI Explorer",
-          "icon": "media/oci-layout.svg"
+          "icon": "media/oci-icon-black.svg"
         }
       ]
     },
@@ -151,11 +159,41 @@
           "default": "",
           "description": "Directory for exported OCI layouts. Leave empty to use a temporary directory."
         },
-        "ociExplorer.jsonDetectionMaxBytes": {
+        "ociExplorer.jsonDetectionMaxSizeMB": {
           "type": "number",
-          "default": 8388608,
+          "default": 8,
           "minimum": 1,
-          "description": "Maximum file size in bytes for automatic OCI JSON detection when opening descriptor files. Files larger than this remain in their default language mode."
+          "description": "Maximum file size in megabytes for automatic OCI JSON detection and pretty-printing when opening descriptor files. Files larger than this remain in their default language mode."
+        },
+        "ociExplorer.customLabels": {
+          "type": "array",
+          "default": [],
+          "markdownDescription": "Custom label rules used to override OCI node names in the tree. Each rule matches by `mediaType`, `predicateType`, and/or `artifactType` (any of the three). Wildcards (`*`) are supported. The first rule whose specified fields all match wins.",
+          "items": {
+            "type": "object",
+            "required": [
+              "label"
+            ],
+            "properties": {
+              "label": {
+                "type": "string",
+                "description": "Human-readable label to display when the rule matches."
+              },
+              "mediaType": {
+                "type": "string",
+                "description": "OCI media type to match (supports * wildcard)."
+              },
+              "predicateType": {
+                "type": "string",
+                "description": "in-toto predicate type to match (supports * wildcard)."
+              },
+              "artifactType": {
+                "type": "string",
+                "description": "OCI artifact type to match (supports * wildcard)."
+              }
+            },
+            "additionalProperties": false
+          }
         }
       }
     }
@@ -171,21 +209,26 @@
     "compile-tests": "tsc -p . --outDir out",
     "pretest": "npm run compile-tests && npm run lint",
     "lint": "eslint src",
-    "test": "node --test out/test/**/*.test.js",
-    "test:vscode": "vscode-test",
+    "test": "npm-run-all -s test:unit test:integration",
+    "test:unit": "node --test out/test/unit/**/*.test.js",
+    "test:integration": "vscode-test",
     "deploy": "vsce publish"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
     "@types/vscode": "^1.120.0",
+    "@types/which": "^3.0.4",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.9.1",
     "esbuild": "^0.28.0",
     "eslint": "^9.39.3",
     "npm-run-all2": "^8.0.4",
-    "typescript": "^5.9.3",
+    "typescript": "^6.0.3",
     "typescript-eslint": "^8.56.1"
+  },
+  "dependencies": {
+    "which": "^5.0.0"
   }
 }

@@ -8,6 +8,13 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
     strategy:
@@ -22,6 +29,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22.x
+          cache: npm
 
       - name: Install dependencies
         run: npm ci
@@ -39,12 +47,12 @@ jobs:
         run: npm run compile-tests
 
       - name: Run unit tests
-        run: npm test
+        run: npm run test:unit
 
-      - name: Run VS Code tests (Linux)
-        run: xvfb-run -a npm run test:vscode
+      - name: Run VS Code integration tests (Linux)
+        run: xvfb-run -a npm run test:integration
         if: runner.os == 'Linux'
 
-      - name: Run VS Code tests (non-Linux)
-        run: npm run test:vscode
+      - name: Run VS Code integration tests (non-Linux)
+        run: npm run test:integration
         if: runner.os != 'Linux'
