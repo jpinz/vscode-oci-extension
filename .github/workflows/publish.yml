@@ -55,7 +55,17 @@ jobs:
         run: npx --yes @vscode/vsce package --out "oci-layout-explorer-${VERSION}.vsix"
 
       - name: Publish to Marketplace
-        run: npx --yes @vscode/vsce publish --packagePath "oci-layout-explorer-${VERSION}.vsix"
+        run: |
+          for attempt in 1 2 3; do
+            npx --yes @vscode/vsce publish --packagePath "oci-layout-explorer-${VERSION}.vsix" && break
+            if [ "${attempt}" -lt 3 ]; then
+              echo "Attempt ${attempt} failed, retrying in 30s..."
+              sleep 30
+            else
+              echo "All publish attempts failed."
+              exit 1
+            fi
+          done
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
