@@ -39,9 +39,6 @@ jobs:
       - name: Check types
         run: npm run check-types
 
-      - name: Bundle
-        run: node esbuild.js
-
       - name: Compile tests
         run: npm run compile-tests
 
@@ -52,17 +49,25 @@ jobs:
         run: xvfb-run -a npm run test:integration
 
       - name: Package VSIX
-        run: npx --yes @vscode/vsce package --out "oci-layout-explorer-${VERSION}.vsix"
+        run: npm run deploy:package -- --out "oci-layout-explorer-${VERSION}.vsix"
 
       - name: Publish to Marketplace
         run: |
-          for attempt in 1 2 3; do
-            npx --yes @vscode/vsce publish --packagePath "oci-layout-explorer-${VERSION}.vsix" && break
-            if [ "${attempt}" -lt 3 ]; then
-              echo "Attempt ${attempt} failed, retrying in 30s..."
-              sleep 30
+          max_attempts=5
+          delay=30
+          for attempt in $(seq 1 "${max_attempts}"); do
+            if npm run deploy -- \
+                --packagePath "oci-layout-explorer-${VERSION}.vsix" \
+                --skip-duplicate; then
+              echo "Publish succeeded on attempt ${attempt}."
+              break
+            fi
+            if [ "${attempt}" -lt "${max_attempts}" ]; then
+              echo "Attempt ${attempt} failed, retrying in ${delay}s..."
+              sleep "${delay}"
+              delay=$((delay * 2))
             else
-              echo "All publish attempts failed."
+              echo "All ${max_attempts} publish attempts failed."
               exit 1
             fi
           done

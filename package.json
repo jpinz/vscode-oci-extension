@@ -212,6 +212,7 @@
     "test": "npm-run-all -s test:unit test:integration",
     "test:unit": "node --test out/test/unit/**/*.test.js",
     "test:integration": "vscode-test",
+    "deploy:package": "vsce package",
     "deploy": "vsce publish"
   },
   "devDependencies": {
