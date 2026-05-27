@@ -39,6 +39,9 @@ jobs:
       - name: Check types
         run: npm run check-types
 
+      - name: Bundle
+        run: node esbuild.js
+
       - name: Compile tests
         run: npm run compile-tests
 
